@@ -224,16 +224,16 @@ export const GOLD_EARLY_EVERY = 4;
 export const GOLD_LATE_NORMAL = 10;
 
 // レーン上の皿は出たときの HP のまま。ここはこれから出す皿だけ。
-// 6個倍は最初の2回（撃破 6/12）。そのあと 2 個ごと。wave は掛けない。
+// 3個倍は最初の2回（撃破 3/6）。そのあと 1 個ごと。wave は掛けない。
 export function netaHpAt(goldKills: number): number {
   const k = Math.max(0, goldKills);
-  const sixTimes = 2;
-  const sixInterval = 6;
+  const earlyTimes = 2;
+  const earlyInterval = 3;
   let doubles: number;
-  if (k < sixTimes * sixInterval) {
-    doubles = Math.floor(k / sixInterval);
+  if (k < earlyTimes * earlyInterval) {
+    doubles = Math.floor(k / earlyInterval);
   } else {
-    doubles = sixTimes + Math.floor((k - sixTimes * sixInterval) / 2);
+    doubles = earlyTimes + (k - earlyTimes * earlyInterval);
   }
   return Math.max(1, 2 ** doubles);
 }
