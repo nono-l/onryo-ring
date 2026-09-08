@@ -41,6 +41,7 @@ import {
   makeWave,
   mulberry32,
   netaHpAt,
+  NINE_T,
   routeFor,
   slotXY,
   summonCostAt,
@@ -360,7 +361,8 @@ function applyBuff(g: Game, id: string) {
 }
 
 function pickBuffs(g: Game): WeaponOption[] {
-  const pool = [...BUFF_POOL];
+  // 花魁バックは 9 時よりゴール側にいないと意味が薄い。序盤は出さない。
+  const pool = BUFF_POOL.filter((o) => o.id !== "back" || g.boss.track <= NINE_T);
   const out: WeaponOption[] = [];
   for (let i = 0; i < 3 && pool.length; i++) {
     const idx = (g.rng() * pool.length) | 0;

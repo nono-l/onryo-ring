@@ -61,6 +61,8 @@ export const BELT_START = 0.48;
 export const BELT_FILL = 10;
 export const NETA_SPAWN_CD = 2;
 export const NETA_RESERVE = 240;
+// 9時は a=π。t がこれ以下＝11時ゴール側へ進んだ。花魁バックはここを過ぎてから出す。
+export const NINE_T = (GOAL_A - Math.PI) / BELT_SPAN;
 
 export const BOSS_X = 236;
 export const BOSS_Y = PIT_Y + 92;
