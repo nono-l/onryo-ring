@@ -151,6 +151,9 @@ export function GameView() {
                 挑戦する
               </button>
               <p className="stat-line">最高記録 WAVE {g?.highWave ?? 0}</p>
+              <a href="/terms" className="terms-link">
+                配信規約
+              </a>
             </div>
           </div>
         )}

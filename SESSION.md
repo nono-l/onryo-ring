@@ -80,6 +80,7 @@ HP（新しく出す皿。既存は据え置き）:
 - バランス数値は `src/game/data.ts` に集める。
 - ルールは `sim.ts`、絵は `draw.ts`。当たりを描画と二重管理しない。先端は `swingTip` を両方から使う。
 - 新しい UI を HTML overlay に足すなら、Canvas 側にも同じ操作を置け。このプレビューは overlay が欠けることがある。
+- 配信許諾は `TERMS.md` と `/terms`。条件はタイトルを付けることだけ。Fuwari 型の短い契約。戻すな。
 
 ## 既知の粗
 

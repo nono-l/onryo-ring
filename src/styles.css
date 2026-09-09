@@ -336,6 +336,57 @@
   color: var(--color-paper-dim);
 }
 
+.terms-link {
+  color: var(--color-paper-dim);
+  font-size: 0.72rem;
+  letter-spacing: 0.22em;
+  text-decoration: none;
+}
+.terms-link:hover {
+  color: var(--color-gold);
+}
+
+.terms-page {
+  min-height: 100dvh;
+  max-width: 36rem;
+  margin: 0 auto;
+  padding: 48px 22px 72px;
+  padding-top: max(48px, env(safe-area-inset-top));
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.terms-page h2 {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  letter-spacing: 0.18em;
+  color: var(--color-gold);
+  margin-bottom: 8px;
+}
+.terms-page p {
+  font-size: 0.95rem;
+  line-height: 1.85;
+  color: var(--color-fog);
+  text-wrap: pretty;
+}
+.terms-en {
+  letter-spacing: 0.18em;
+  color: var(--color-paper-dim);
+  font-size: 0.78rem;
+}
+.terms-close {
+  font-family: var(--font-display);
+  color: var(--color-gold) !important;
+  letter-spacing: 0.06em;
+}
+.terms-back {
+  align-self: center;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cta,
   .choice-card {
