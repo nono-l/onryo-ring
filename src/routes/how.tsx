@@ -1,0 +1,96 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+
+export const Route = createFileRoute("/how")({
+  component: HowPage,
+  head: () => ({
+    meta: [{ title: "遊び方 · 怨霊円陣" }],
+  }),
+});
+
+function HowPage() {
+  return (
+    <main className="terms-page">
+      <p className="display-sub">ONRYO RING</p>
+      <h1 className="display-title">遊び方</h1>
+      <p className="terms-en">How to hold the ring</p>
+      <p className="overlay-copy">
+        手前の手毬を壊すと式神が降りる。花魁が11時のゴールへ着いたら円陣は破れる。
+      </p>
+
+      <section>
+        <h2>召喚</h2>
+        <p>
+          円の上にある手毬は、勝手には落ちない。武器の<strong>先端</strong>が触れたときだけ削れる。壊した手毬1つにつき式神が1体、空いているマスへ出る。口寄せ札を取ると、同じ壊しで追加の体数が乗る。
+        </p>
+      </section>
+
+      <section>
+        <h2>合成</h2>
+        <p>
+          同じ式神で同じ表示レベル同士を重ねる。3体分たまるとレベルが上がる。表示は 1 → 3 → 5。上がるのは基礎攻撃力と武器の見た目だけ。振りの速さは合成では変わらない。表示11以上は、先端に重なった相手へ同時に入る。届いていない相手には入らない。
+        </p>
+      </section>
+
+      <section>
+        <h2>武器昇格</h2>
+        <p>
+          手毬を壊すか、手毬が寿司になってレーンに乗った回数を数える。その数が <strong>14 / 36 / 58</strong> に達すると3択が出る。1ラン最大3回。候補は毎回4種から3枚。
+        </p>
+        <ul className="how-list">
+          <li>
+            <span>鬼金棒</span>全員の攻撃 +30%
+          </li>
+          <li>
+            <span>時雨</span>攻撃速度 +22%
+          </li>
+          <li>
+            <span>金運</span>入手両 +40%
+          </li>
+          <li>
+            <span>口寄せ札</span>手毬1つにつき式神 +1。重ねると +2、+3
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>上級ユニット</h2>
+        <p>
+          花魁のHPが15%以下、または処理数が38に達したとき、1ラン1回だけ道が開く。成功するとその式神が円陣に降り、以降の手毬召喚の候補にも入る。失敗すると寿司が6皿増え、花魁はゴール側へ進む。
+        </p>
+        <ul className="how-list">
+          <li>
+            <span>WAVE 1–2</span>白面（失敗50% / 攻撃+1000%）か 高天（必ず出る / +500%）
+          </li>
+          <li>
+            <span>WAVE 3〜</span>黒（失敗35% / +800%）か 澪（必ず出る / +400%）
+          </li>
+        </ul>
+        <p>最初から呼べるのはお菊だけ。白面・高天・黒・澪は、この道を通らないと召喚に混ざらない。</p>
+      </section>
+
+      <section>
+        <h2>金皿</h2>
+        <p>
+          金の皿を崩すとパワーアップ3択。花魁バックは、花魁が9時よりゴール側にいるときだけ候補に入る。金皿は最初4個壊すまで4皿に1個。そのあとは通常10皿に1個。硬さは最初2回だけ3個壊すたび倍、そのあとは1個壊すたびに倍。
+        </p>
+      </section>
+
+      <section>
+        <h2>店</h2>
+        <p>
+          敗北で両が残る（所持両÷5 + WAVE×6）。タイトルの式神強化で、次の挑戦の攻撃・速度・開始の両が底上げされる。Googleで入れると別の端末でも続く。
+        </p>
+      </section>
+
+      <p className="terms-close">先端で手毬を割り、同じ影を三つ重ねよ。道が開いたら、賭けてよい。</p>
+      <div className="how-nav">
+        <Link to="/" className="ghost-btn terms-back">
+          円陣へ戻る
+        </Link>
+        <Link to="/terms" className="terms-link">
+          配信規約
+        </Link>
+      </div>
+    </main>
+  );
+}

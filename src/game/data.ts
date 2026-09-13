@@ -3,7 +3,7 @@
   マスを正方形グリッドに戻すな。円陣は同心円 SLOT_LAYOUT。
   近接の長さは swingLen / swingTip が描画と当たりの唯一の定義。
 */
-import type { HeroDef, HeroId, RouteOption, WeaponOption } from "./types";
+import type { HeroDef, HeroId, RouteOption, ShopId, ShopUpgrades, WeaponOption } from "./types";
 
 export const VW = 390;
 export const VH = 844;
@@ -293,11 +293,16 @@ export function displayLevel(level: number): number {
   return 2 * level - 1;
 }
 
+/** 表示10まで単体。それを超えたら、重なっている当たり判定には全部入る。範囲ダメにはしない。 */
+export function isMultiHit(level: number): boolean {
+  return displayLevel(level) > 10;
+}
+
 export const WEAPON_POOL: WeaponOption[] = [
   { id: "atk", name: "鬼金棒", desc: "全員の攻撃力 +30%" },
   { id: "spd", name: "時雨", desc: "攻撃速度 +22%" },
   { id: "gold", name: "金運", desc: "獲得コイン +40%" },
-  { id: "cheap", name: "口寄せ札", desc: "召喚コスト −4（最低 6）" },
+  { id: "cheap", name: "口寄せ札", desc: "手毬1つにつき式神がもう1体。重ねると増える" },
 ];
 
 export const BUFF_POOL: WeaponOption[] = [
@@ -354,3 +359,32 @@ export function routeFor(wave: number): RouteOption[] {
 }
 
 export const SAVE_KEY = "onryo-ring-v1";
+export const DEBUG_KEY = "onryo-ring-debug";
+
+export const START_COINS = 60;
+export const SHOP_MAX = 12;
+
+export function emptyShop(): ShopUpgrades {
+  return { atk: 0, spd: 0, coin: 0 };
+}
+
+export function shopCost(lv: number): number {
+  return 25 + lv * 20;
+}
+
+export function shopValue(id: ShopId, lv: number): string {
+  if (id === "atk") return `攻撃 ×${(1 + lv * 0.12).toFixed(2)}`;
+  if (id === "spd") return `速度 ×${(1 + lv * 0.07).toFixed(2)}`;
+  return `開始 ${START_COINS + lv * 15} 両`;
+}
+
+export function runBankGain(coins: number, wave: number): number {
+  return Math.max(0, Math.floor(coins / 5) + wave * 6);
+}
+
+export const SHOP_ITEMS: Array<{ id: ShopId; name: string; desc: string }> = [
+  { id: "atk", name: "基礎攻撃", desc: "次の挑戦の攻撃倍率の底" },
+  { id: "spd", name: "攻撃速度", desc: "次の挑戦の振りの速さの底" },
+  { id: "coin", name: "開始の両", desc: "次の挑戦の所持両" },
+];
+

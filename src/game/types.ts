@@ -61,6 +61,7 @@ export interface Projectile {
   ty: number;
   target: "ball" | "boss" | "wrap";
   targetId: number;
+  multi: boolean;
 }
 
 export interface Particle {
@@ -99,6 +100,13 @@ export interface RouteOption {
   risk: boolean;
   failChance: number;
   atkMul: number;
+}
+
+export type ShopId = "atk" | "spd" | "coin";
+export interface ShopUpgrades {
+  atk: number;
+  spd: number;
+  coin: number;
 }
 
 export interface DragState {
@@ -147,6 +155,10 @@ export interface Game {
   rng: () => number;
   nextId: number;
   highWave: number;
+  bank: number;
+  shop: ShopUpgrades;
+  lastEarned: number;
+  twinSummon: number;
   weaponOptions: WeaponOption[];
   buffOptions: WeaponOption[];
   routeOptions: RouteOption[];

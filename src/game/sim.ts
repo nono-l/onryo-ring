@@ -23,6 +23,12 @@ import {
   PIT_Y,
   RARITY_WEIGHT,
   SAVE_KEY,
+  DEBUG_KEY,
+  START_COINS,
+  SHOP_MAX,
+  shopCost,
+  runBankGain,
+  emptyShop,
   SLOT_COUNT,
   SLOT_HIT_R,
   STACK_BOTTOM,
@@ -37,6 +43,7 @@ import {
   bossHp,
   buffCardRect,
   displayLevel,
+  isMultiHit,
   levelMul,
   makeWave,
   mulberry32,
@@ -49,7 +56,7 @@ import {
   swingTipR,
   temariHpAt,
 } from "./data";
-import type { Ball, Game, Hero, HeroId, Mode, Projectile, Role, WeaponOption } from "./types";
+import type { Ball, Game, Hero, HeroId, Mode, Projectile, Role, ShopId, ShopUpgrades, WeaponOption } from "./types";
 import * as audio from "./audio";
 
 function nid(g: Game): number {
@@ -57,24 +64,182 @@ function nid(g: Game): number {
   return g.nextId;
 }
 
-function loadHigh(): number {
+export type MetaSave = {
+  version: number;
+  highWave: number;
+  bank: number;
+  shop: ShopUpgrades;
+};
+
+function emptyMeta(): MetaSave {
+  return { version: 2, highWave: 0, bank: 0, shop: emptyShop() };
+}
+
+function loadMeta(): MetaSave {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return 0;
-    const p = JSON.parse(raw) as { version?: number; highWave?: number };
-    return p.highWave ?? 0;
+    if (!raw) return emptyMeta();
+    const p = JSON.parse(raw) as Partial<MetaSave> & { highWave?: number };
+    return {
+      version: 2,
+      highWave: p.highWave ?? 0,
+      bank: p.bank ?? 0,
+      shop: {
+        atk: p.shop?.atk ?? 0,
+        spd: p.shop?.spd ?? 0,
+        coin: p.shop?.coin ?? 0,
+      },
+    };
   } catch {
-    return 0;
+    return emptyMeta();
   }
 }
 
-function saveHigh(g: Game) {
+export function snapshotMeta(g: Game): MetaSave {
+  return { version: 2, highWave: g.highWave, bank: g.bank, shop: { ...g.shop } };
+}
+
+export function mergeMeta(a: MetaSave, b: MetaSave): MetaSave {
+  return {
+    version: 2,
+    highWave: Math.max(a.highWave, b.highWave),
+    bank: Math.max(a.bank, b.bank),
+    shop: {
+      atk: Math.max(a.shop.atk, b.shop.atk),
+      spd: Math.max(a.shop.spd, b.shop.spd),
+      coin: Math.max(a.shop.coin, b.shop.coin),
+    },
+  };
+}
+
+export function applyMeta(g: Game, meta: MetaSave) {
+  g.highWave = meta.highWave;
+  g.bank = meta.bank;
+  g.shop = { atk: meta.shop.atk, spd: meta.shop.spd, coin: meta.shop.coin };
+  if (g.demo || g.mode === "title") applyShop(g);
+}
+
+let cloudFlush: ((m: MetaSave) => void) | null = null;
+export function setCloudFlush(fn: ((m: MetaSave) => void) | null) {
+  cloudFlush = fn;
+}
+
+function saveMeta(g: Game) {
   try {
     if (g.wave > g.highWave) g.highWave = g.wave;
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ version: 1, highWave: g.highWave }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify(snapshotMeta(g)));
   } catch {
     /* private mode */
   }
+  cloudFlush?.(snapshotMeta(g));
+}
+
+function loadDebugFlag(): boolean {
+  try {
+    return localStorage.getItem(DEBUG_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setDebugMode(g: Game, on: boolean) {
+  g.debug = on;
+  try {
+    localStorage.setItem(DEBUG_KEY, on ? "1" : "0");
+  } catch {
+    /* private mode */
+  }
+}
+
+export type DebugField =
+  | "bank"
+  | "shopAtk"
+  | "shopSpd"
+  | "shopCoin"
+  | "coins"
+  | "wave"
+  | "processed"
+  | "goldKills"
+  | "bossHp"
+  | "track"
+  | "atkMul"
+  | "spdMul"
+  | "twin"
+  | "highWave";
+
+function clamp(n: number, lo: number, hi: number) {
+  return Math.max(lo, Math.min(hi, n));
+}
+
+export function debugNudge(g: Game, field: DebugField, dir: 1 | -1) {
+  const s = dir;
+  if (field === "bank") g.bank = Math.max(0, g.bank + s * 10);
+  else if (field === "shopAtk") g.shop.atk = clamp(g.shop.atk + s, 0, SHOP_MAX);
+  else if (field === "shopSpd") g.shop.spd = clamp(g.shop.spd + s, 0, SHOP_MAX);
+  else if (field === "shopCoin") g.shop.coin = clamp(g.shop.coin + s, 0, SHOP_MAX);
+  else if (field === "coins") g.coins = Math.max(0, g.coins + s * 10);
+  else if (field === "wave") g.wave = Math.max(1, g.wave + s);
+  else if (field === "processed") g.processed = Math.max(0, g.processed + s);
+  else if (field === "goldKills") g.goldKills = Math.max(0, g.goldKills + s);
+  else if (field === "bossHp") {
+    g.boss.hp = Math.max(1, g.boss.hp + s * 100);
+    g.boss.maxHp = Math.max(g.boss.maxHp, g.boss.hp);
+  } else if (field === "track") g.boss.track = clamp(g.boss.track + s * 0.05, 0.02, 0.95);
+  else if (field === "atkMul") g.atkMul = Math.max(0.1, Math.round((g.atkMul + s * 0.1) * 10) / 10);
+  else if (field === "spdMul") g.spdMul = Math.max(0.1, Math.round((g.spdMul + s * 0.1) * 10) / 10);
+  else if (field === "twin") g.twinSummon = Math.max(0, g.twinSummon + s);
+  else if (field === "highWave") g.highWave = Math.max(0, g.highWave + s);
+  if (field === "shopAtk" || field === "shopSpd" || field === "shopCoin") {
+    if (g.demo || g.mode === "title") applyShop(g);
+  }
+  if (field === "bank" || field.startsWith("shop") || field === "highWave") saveMeta(g);
+  recomputePower(g);
+}
+
+export function debugUnlockAll(g: Game) {
+  g.unlocked = (Object.keys(HEROES) as HeroId[]).slice();
+}
+
+export function debugOpenWeapon(g: Game) {
+  if (g.mode === "fail") return;
+  openWeapon(g);
+}
+
+export function debugOpenRoute(g: Game) {
+  if (g.mode === "fail") return;
+  openRoute(g);
+}
+
+export function debugOpenBuff(g: Game) {
+  if (g.mode === "fail") return;
+  g.buffOptions = pickBuffs(g);
+  g.mode = "buff";
+}
+
+export function applyShop(g: Game) {
+  g.atkMul = 1 + g.shop.atk * 0.12;
+  g.spdMul = 1 + g.shop.spd * 0.07;
+  g.coins = START_COINS + g.shop.coin * 15;
+}
+
+export function buyShop(g: Game, id: ShopId): boolean {
+  const lv = g.shop[id] ?? 0;
+  if (lv >= SHOP_MAX) return false;
+  const cost = shopCost(lv);
+  if (g.bank < cost) return false;
+  g.bank -= cost;
+  g.shop[id] = lv + 1;
+  saveMeta(g);
+  audio.sfxSelect();
+  return true;
+}
+
+function awardBank(g: Game) {
+  if (g.demo || g.lastEarned > 0) return;
+  const gain = runBankGain(g.coins, g.wave);
+  g.lastEarned = gain;
+  g.bank += gain;
+  saveMeta(g);
 }
 
 function makeBall(g: Game, spec: { hp: number; pattern: number }, kind: Ball["kind"] = "stack"): Ball {
@@ -167,12 +332,13 @@ function heroAtk(g: Game, h: Hero): number {
 
 export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boolean }): Game {
   const rng = mulberry32((Math.random() * 0xffffffff) | 0);
+  const meta = loadMeta();
   const g: Game = {
     mode: "title",
     demo: !!opts?.demo,
     t: 0,
     wave: 1,
-    coins: 60,
+    coins: START_COINS,
     summonCost: 10,
     summonCount: 0,
     combatPower: 0,
@@ -191,14 +357,18 @@ export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boo
     spawnQueue: makeWave(1, rng),
     dropCd: 0,
     muted: opts?.muted ?? false,
-    debug: opts?.debug ?? false,
+    debug: opts?.debug ?? loadDebugFlag(),
     unlocked: ["okiku"],
     atkMul: 1,
     spdMul: 1,
     goldMul: 1,
+    twinSummon: 0,
     rng,
     nextId: 1,
-    highWave: loadHigh(),
+    highWave: meta.highWave,
+    bank: meta.bank,
+    shop: meta.shop,
+    lastEarned: 0,
     weaponOptions: [],
     buffOptions: [],
     routeOptions: [],
@@ -219,6 +389,7 @@ export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boo
   layoutBelt(g, true);
   refillStack(g, STACK_START);
   layoutStack(g, true);
+  applyShop(g);
   recomputePower(g);
   return g;
 }
@@ -227,10 +398,17 @@ export function resetRun(g: Game, demo = false) {
   const high = g.highWave;
   const muted = g.muted;
   const debug = g.debug;
+  const bank = g.bank;
+  const shop = { ...g.shop };
+  const lastEarned = g.lastEarned;
   const fresh = createGame({ demo, muted, debug });
   Object.assign(g, fresh);
   g.highWave = high;
   g.debug = debug;
+  g.bank = bank;
+  g.shop = shop;
+  g.lastEarned = demo ? lastEarned : 0;
+  applyShop(g);
   g.mode = demo ? "title" : "playing";
   g.demo = demo;
 }
@@ -388,27 +566,53 @@ function onGoldPlate(g: Game, b: Ball) {
 }
 
 function applyBallDmg(g: Game, b: Ball, dmg: number) {
-  b.hp -= dmg;
-  float(g, b.x, b.y, `${Math.round(dmg)}`, "#fff8ee");
-  burst(g, b.x, b.y, "#fff", 4);
-  if (b.hp <= 0) popBall(g, b);
+  hurtBall(g, b, dmg);
 }
 
 function applyBossDmg(g: Game, dmg: number) {
-  g.boss.hp -= dmg;
+  hurtBoss(g, dmg);
+}
+
+type HitResult = { applied: number; hp: number; dead: boolean };
+
+function rollStrike(g: Game, h: Hero): number {
+  return Math.max(1, Math.round(heroAtk(g, h) * (0.88 + g.rng() * 0.24)));
+}
+
+function resolveHit(hp: number, amount: number): HitResult {
+  const applied = Math.max(0, amount);
+  const next = Math.max(0, hp - applied);
+  return { applied, hp: next, dead: next <= 0 };
+}
+
+function hurtBall(g: Game, b: Ball, amount: number): HitResult | null {
+  if (b.hp <= 0) return null;
+  const hit = resolveHit(b.hp, amount);
+  b.hp = hit.hp;
+  float(g, b.x, b.y, `${Math.round(hit.applied)}`, "#fff8ee");
+  burst(g, b.x, b.y, "#fff", 4);
+  if (hit.dead) popBall(g, b);
+  return hit;
+}
+
+function hurtBoss(g: Game, amount: number): HitResult | null {
+  if (g.boss.hp <= 0) return null;
+  const hit = resolveHit(g.boss.hp, amount);
+  g.boss.hp = hit.hp;
   g.boss.hitFlash = 0.12;
   g.shake = Math.min(1, g.shake + 0.18);
   g.hitstop = Math.max(g.hitstop, 0.04);
-  if (dmg >= 22) {
+  if (hit.applied >= 22) {
     float(g, g.boss.x + 4, g.boss.y - 52, "BOOM!", "#ffe28a", 2.1);
     burst(g, g.boss.x, g.boss.y - 8, "#ffe28a", 16, "puff");
     slashFx(g, g.boss.x, g.boss.y - 12);
   } else {
-    float(g, g.boss.x, g.boss.y - 28, `${Math.round(dmg)}`, "#ffe8a0");
+    float(g, g.boss.x, g.boss.y - 28, `${Math.round(hit.applied)}`, "#ffe8a0");
     burst(g, g.boss.x, g.boss.y - 10, "#e8c15a", 6);
   }
   if (!g.demo) audio.sfxHit();
-  if (g.boss.hp <= 0) onBossDown(g);
+  if (hit.dead) onBossDown(g);
+  return hit;
 }
 
 function onBossDown(g: Game) {
@@ -417,7 +621,7 @@ function onBossDown(g: Game) {
   g.coins += Math.round(12 * g.wave * g.goldMul);
   if (!g.demo) audio.sfxBoss();
   g.wave += 1;
-  saveHigh(g);
+  saveMeta(g);
   g.boss = {
     hp: bossHp(g.wave),
     maxHp: bossHp(g.wave),
@@ -461,7 +665,8 @@ function failIfGoal(g: Game) {
   }
   if (g.mode === "fail") return;
   g.mode = "fail";
-  saveHigh(g);
+  awardBank(g);
+  saveMeta(g);
   audio.sfxFail();
 }
 
@@ -573,36 +778,69 @@ function pickTarget(g: Game, hx: number, hy: number, range: number, role: Role, 
 
 function meleeSweep(g: Game, h: Hero, pos: { x: number; y: number }) {
   // 体の周囲円・inPit 全当てを戻すな。当たるのは今の振りの先端だけ。
-  const dmg = Math.max(1, Math.round(heroAtk(g, h) * (0.88 + g.rng() * 0.24)));
+  // 複数体は「先端に重なった相手だけ」。届いていない寿司には入らない。
+  const amount = rollStrike(g, h);
   h.attackT = 1;
   const tip = swingTip(h, pos.x, pos.y);
   const r = swingTipR(h);
   h.targetX = tip.x;
   h.targetY = tip.y;
+  const multi = isMultiHit(h.level);
 
-  let hitBall = false;
-  const strike = (b: Ball, extra: number) => {
+  type Hit = { kind: "ball"; b: Ball } | { kind: "boss" };
+  const overlapped: Hit[] = [];
+  const consider = (b: Ball, extra: number) => {
     if (b.hp <= 0) return;
-    if (!tipHits(tip, r, b.x, b.y, extra)) return;
-    applyBallDmg(g, b, dmg);
-    hitBall = true;
+    if (tipHits(tip, r, b.x, b.y, extra)) overlapped.push({ kind: "ball", b });
   };
-  for (const b of g.falling) strike(b, BALL_R);
-  if (g.stack.length) strike(g.stack[0]!, BALL_R);
-  for (const b of g.wrap) strike(b, WRAP_ORB_R);
+  for (const b of g.falling) consider(b, BALL_R);
+  if (multi) {
+    for (const b of g.stack) consider(b, BALL_R);
+  } else if (g.stack.length) {
+    consider(g.stack[0]!, BALL_R);
+  }
+  for (const b of g.wrap) consider(b, WRAP_ORB_R);
+  if (tipHits(tip, r, g.boss.x, g.boss.y - 10, 26)) overlapped.push({ kind: "boss" });
+
+  const apply = (hit: Hit) => {
+    if (hit.kind === "boss") hurtBoss(g, amount);
+    else hurtBall(g, hit.b, amount);
+  };
+
+  let hitBoss = false;
+  let hitBall = false;
+  const deliver = (hit: Hit) => {
+    apply(hit);
+    if (hit.kind === "boss") hitBoss = true;
+    else hitBall = true;
+  };
+
+  if (multi) {
+    for (const hit of overlapped) deliver(hit);
+  } else if (overlapped.length) {
+    let best = overlapped[0]!;
+    let bestD = Infinity;
+    for (const hit of overlapped) {
+      const x = hit.kind === "boss" ? g.boss.x : hit.b.x;
+      const y = hit.kind === "boss" ? g.boss.y - 10 : hit.b.y;
+      const d = dist2(tip.x, tip.y, x, y);
+      if (d < bestD) {
+        bestD = d;
+        best = hit;
+      }
+    }
+    deliver(best);
+  }
+
   pruneDead(g);
-
-  const hitBoss = tipHits(tip, r, g.boss.x, g.boss.y - 10, 26);
-  if (hitBoss) applyBossDmg(g, dmg);
-  else if (hitBall && !g.demo) audio.sfxHit();
-
+  if (!hitBoss && hitBall && !g.demo) audio.sfxHit();
   slashFx(g, tip.x, tip.y);
 }
 
 function fireRanged(g: Game, h: Hero, target: Target) {
   const def = HEROES[h.defId];
   const pos = slotXY(h.slot);
-  const dmg = Math.max(1, Math.round(heroAtk(g, h) * (0.88 + g.rng() * 0.24)));
+  const amount = rollStrike(g, h);
   h.attackT = 1;
   const tx = target.kind === "boss" ? g.boss.x : target.ball.x;
   const ty = target.kind === "boss" ? g.boss.y - 18 : target.ball.y;
@@ -618,7 +856,7 @@ function fireRanged(g: Game, h: Hero, target: Target) {
     y: pos.y + Math.sin(ang) * 22 - 4,
     vx: 0,
     vy: 0,
-    dmg,
+    dmg: amount,
     life: 0.55,
     color: def.projectile,
     homing: true,
@@ -626,6 +864,7 @@ function fireRanged(g: Game, h: Hero, target: Target) {
     ty,
     target: target.kind === "boss" ? "boss" : target.ball.kind === "wrap" ? "wrap" : "ball",
     targetId: target.kind === "boss" ? -1 : target.ball.id,
+    multi: isMultiHit(h.level),
   };
   const spd = 380;
   p.vx = Math.cos(ang) * spd;
@@ -679,7 +918,15 @@ function stepProjectiles(g: Game, dt: number) {
     p.y += p.vy * dt;
     const hitR = p.target === "boss" ? 36 : 18;
     if (Math.hypot(p.x - p.tx, p.y - p.ty) < hitR || p.life <= 0) {
-      if (p.target === "boss") applyBossDmg(g, p.dmg);
+      if (p.multi) {
+        const rBall = 18;
+        const ballHit = (b: Ball, extra: number) =>
+          b.hp > 0 && dist2(p.x, p.y, b.x, b.y) <= (rBall + extra) * (rBall + extra);
+        for (const b of g.falling) if (ballHit(b, BALL_R)) applyBallDmg(g, b, p.dmg);
+        for (const b of g.stack) if (ballHit(b, BALL_R)) applyBallDmg(g, b, p.dmg);
+        for (const b of g.wrap) if (ballHit(b, WRAP_ORB_R)) applyBallDmg(g, b, p.dmg);
+        if (dist2(p.x, p.y, g.boss.x, g.boss.y - 18) <= 36 * 36) applyBossDmg(g, p.dmg);
+      } else if (p.target === "boss") applyBossDmg(g, p.dmg);
       else {
         const b = findBall(g, p.targetId);
         if (b && b.hp > 0) applyBallDmg(g, b, p.dmg);
@@ -765,6 +1012,17 @@ export function trySummon(g: Game, opts?: { free?: boolean }): boolean {
   const p = slotXY(slot);
   burst(g, p.x, p.y, "#e8c15a", 10, "puff");
   if (free) float(g, p.x, p.y - 26, "召喚", "#e8c15a");
+  if (free && g.twinSummon > 0) {
+    for (let i = 0; i < g.twinSummon; i++) {
+      const extra = firstEmpty(g);
+      if (extra < 0) break;
+      const id2 = rollSummon(g);
+      g.slots[extra] = seedHero(g, id2, extra);
+      const p2 = slotXY(extra);
+      burst(g, p2.x, p2.y, "#c9e8ff", 8, "puff");
+      float(g, p2.x, p2.y - 26, "二重", "#c9e8ff");
+    }
+  }
   recomputePower(g);
   if (!g.demo) audio.sfxSummon();
   return true;
@@ -910,7 +1168,7 @@ export function chooseWeapon(g: Game, id: string) {
   if (id === "atk") g.atkMul *= 1.3;
   if (id === "spd") g.spdMul *= 1.22;
   if (id === "gold") g.goldMul *= 1.4;
-  if (id === "cheap") g.summonCost = Math.max(6, g.summonCost - 4);
+  if (id === "cheap") g.twinSummon += 1;
   recomputePower(g);
   g.mode = "playing";
   g.flashBanner = null;
