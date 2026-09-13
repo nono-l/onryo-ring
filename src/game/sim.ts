@@ -24,11 +24,23 @@ import {
   RARITY_WEIGHT,
   SAVE_KEY,
   DEBUG_KEY,
+  PLAY_KEY,
   START_COINS,
-  SHOP_MAX,
   shopCost,
+  shopMax,
+  shopT1Maxed,
+  isShopT2,
+  isShopT3,
+  shopT3Open,
+  extraOkikuAt,
+  weaponAt,
+  routeProcessedAt,
+  routeHpAt,
+  wrapBackAt,
+  armCount,
   runBankGain,
   emptyShop,
+  readShop,
   SLOT_COUNT,
   SLOT_HIT_R,
   STACK_BOTTOM,
@@ -56,7 +68,7 @@ import {
   swingTipR,
   temariHpAt,
 } from "./data";
-import type { Ball, Game, Hero, HeroId, Mode, Projectile, Role, ShopId, ShopUpgrades, WeaponOption } from "./types";
+import type { Ball, Game, Hero, HeroId, Mode, PlayStyle, Projectile, Role, ShopId, ShopUpgrades, WeaponOption } from "./types";
 import * as audio from "./audio";
 
 function nid(g: Game): number {
@@ -64,50 +76,48 @@ function nid(g: Game): number {
   return g.nextId;
 }
 
-export type MetaSave = {
-  version: number;
-  highWave: number;
-  bank: number;
-  shop: ShopUpgrades;
+type SaveBlob = {
+  version?: number;
+  highWave?: number;
+  bank?: number;
+  shop?: Partial<ShopUpgrades>;
 };
 
-function emptyMeta(): MetaSave {
-  return { version: 2, highWave: 0, bank: 0, shop: emptyShop() };
-}
+export type MetaSave = { highWave: number; bank: number; shop: ShopUpgrades };
 
 function loadMeta(): MetaSave {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return emptyMeta();
-    const p = JSON.parse(raw) as Partial<MetaSave> & { highWave?: number };
+    if (!raw) return { highWave: 0, bank: 0, shop: emptyShop() };
+    const p = JSON.parse(raw) as SaveBlob;
     return {
-      version: 2,
       highWave: p.highWave ?? 0,
-      bank: p.bank ?? 0,
-      shop: {
-        atk: p.shop?.atk ?? 0,
-        spd: p.shop?.spd ?? 0,
-        coin: p.shop?.coin ?? 0,
-      },
+      bank: Math.max(0, Math.floor(p.bank ?? 0)),
+      shop: readShop(p.shop),
     };
   } catch {
-    return emptyMeta();
+    return { highWave: 0, bank: 0, shop: emptyShop() };
   }
 }
 
 export function snapshotMeta(g: Game): MetaSave {
-  return { version: 2, highWave: g.highWave, bank: g.bank, shop: { ...g.shop } };
+  return { highWave: g.highWave, bank: g.bank, shop: { ...g.shop } };
 }
 
 export function mergeMeta(a: MetaSave, b: MetaSave): MetaSave {
   return {
-    version: 2,
     highWave: Math.max(a.highWave, b.highWave),
     bank: Math.max(a.bank, b.bank),
     shop: {
       atk: Math.max(a.shop.atk, b.shop.atk),
       spd: Math.max(a.shop.spd, b.shop.spd),
       coin: Math.max(a.shop.coin, b.shop.coin),
+      okiku: Math.max(a.shop.okiku, b.shop.okiku),
+      path: Math.max(a.shop.path, b.shop.path),
+      base: Math.max(a.shop.base, b.shop.base),
+      seed: Math.max(a.shop.seed, b.shop.seed),
+      back: Math.max(a.shop.back, b.shop.back),
+      arms: Math.max(a.shop.arms, b.shop.arms),
     },
   };
 }
@@ -115,7 +125,7 @@ export function mergeMeta(a: MetaSave, b: MetaSave): MetaSave {
 export function applyMeta(g: Game, meta: MetaSave) {
   g.highWave = meta.highWave;
   g.bank = meta.bank;
-  g.shop = { atk: meta.shop.atk, spd: meta.shop.spd, coin: meta.shop.coin };
+  g.shop = readShop(meta.shop);
   if (g.demo || g.mode === "title") applyShop(g);
 }
 
@@ -127,7 +137,15 @@ export function setCloudFlush(fn: ((m: MetaSave) => void) | null) {
 function saveMeta(g: Game) {
   try {
     if (g.wave > g.highWave) g.highWave = g.wave;
-    localStorage.setItem(SAVE_KEY, JSON.stringify(snapshotMeta(g)));
+    localStorage.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        version: 2,
+        highWave: g.highWave,
+        bank: g.bank,
+        shop: g.shop,
+      }),
+    );
   } catch {
     /* private mode */
   }
@@ -151,11 +169,34 @@ export function setDebugMode(g: Game, on: boolean) {
   }
 }
 
+function loadPlayStyle(): PlayStyle {
+  try {
+    return localStorage.getItem(PLAY_KEY) === "manual" ? "manual" : "active";
+  } catch {
+    return "active";
+  }
+}
+
+export function setPlayStyle(g: Game, style: PlayStyle) {
+  g.playStyle = style;
+  try {
+    localStorage.setItem(PLAY_KEY, style);
+  } catch {
+    /* private mode */
+  }
+}
+
 export type DebugField =
   | "bank"
   | "shopAtk"
   | "shopSpd"
   | "shopCoin"
+  | "shopOkiku"
+  | "shopPath"
+  | "shopBase"
+  | "shopSeed"
+  | "shopBack"
+  | "shopArms"
   | "coins"
   | "wave"
   | "processed"
@@ -174,9 +215,15 @@ function clamp(n: number, lo: number, hi: number) {
 export function debugNudge(g: Game, field: DebugField, dir: 1 | -1) {
   const s = dir;
   if (field === "bank") g.bank = Math.max(0, g.bank + s * 10);
-  else if (field === "shopAtk") g.shop.atk = clamp(g.shop.atk + s, 0, SHOP_MAX);
-  else if (field === "shopSpd") g.shop.spd = clamp(g.shop.spd + s, 0, SHOP_MAX);
-  else if (field === "shopCoin") g.shop.coin = clamp(g.shop.coin + s, 0, SHOP_MAX);
+  else if (field === "shopAtk") g.shop.atk = clamp(g.shop.atk + s, 0, shopMax("atk"));
+  else if (field === "shopSpd") g.shop.spd = clamp(g.shop.spd + s, 0, shopMax("spd"));
+  else if (field === "shopCoin") g.shop.coin = clamp(g.shop.coin + s, 0, shopMax("coin"));
+  else if (field === "shopOkiku") g.shop.okiku = clamp(g.shop.okiku + s, 0, shopMax("okiku"));
+  else if (field === "shopPath") g.shop.path = clamp(g.shop.path + s, 0, shopMax("path"));
+  else if (field === "shopBase") g.shop.base = clamp(g.shop.base + s, 0, shopMax("base"));
+  else if (field === "shopSeed") g.shop.seed = clamp(g.shop.seed + s, 0, shopMax("seed"));
+  else if (field === "shopBack") g.shop.back = clamp(g.shop.back + s, 0, shopMax("back"));
+  else if (field === "shopArms") g.shop.arms = clamp(g.shop.arms + s, 0, shopMax("arms"));
   else if (field === "coins") g.coins = Math.max(0, g.coins + s * 10);
   else if (field === "wave") g.wave = Math.max(1, g.wave + s);
   else if (field === "processed") g.processed = Math.max(0, g.processed + s);
@@ -189,7 +236,7 @@ export function debugNudge(g: Game, field: DebugField, dir: 1 | -1) {
   else if (field === "spdMul") g.spdMul = Math.max(0.1, Math.round((g.spdMul + s * 0.1) * 10) / 10);
   else if (field === "twin") g.twinSummon = Math.max(0, g.twinSummon + s);
   else if (field === "highWave") g.highWave = Math.max(0, g.highWave + s);
-  if (field === "shopAtk" || field === "shopSpd" || field === "shopCoin") {
+  if (field === "shopAtk" || field === "shopSpd" || field === "shopCoin" || field === "shopSeed") {
     if (g.demo || g.mode === "title") applyShop(g);
   }
   if (field === "bank" || field.startsWith("shop") || field === "highWave") saveMeta(g);
@@ -220,12 +267,15 @@ export function applyShop(g: Game) {
   g.atkMul = 1 + g.shop.atk * 0.12;
   g.spdMul = 1 + g.shop.spd * 0.07;
   g.coins = START_COINS + g.shop.coin * 15;
+  g.twinSummon = g.shop.seed;
 }
 
 export function buyShop(g: Game, id: ShopId): boolean {
+  if (isShopT2(id) && !shopT1Maxed(g.shop)) return false;
+  if (isShopT3(id) && !shopT3Open(g.shop)) return false;
   const lv = g.shop[id] ?? 0;
-  if (lv >= SHOP_MAX) return false;
-  const cost = shopCost(lv);
+  if (lv >= shopMax(id)) return false;
+  const cost = shopCost(id, lv);
   if (g.bank < cost) return false;
   g.bank -= cost;
   g.shop[id] = lv + 1;
@@ -269,7 +319,7 @@ function stampGoldNeta(g: Game, b: Ball) {
     return;
   }
   g.netaSinceGold += 1;
-  if (g.netaSinceGold > GOLD_LATE_NORMAL) {
+  if (g.netaSinceGold >= GOLD_LATE_NORMAL) {
     b.gold = true;
     g.netaSinceGold = 0;
   } else {
@@ -327,10 +377,10 @@ function seedHero(g: Game, defId: HeroId, slot: number, buffMul = 1): Hero {
 
 function heroAtk(g: Game, h: Hero): number {
   const d = HEROES[h.defId];
-  return d.atk * levelMul(h.level) * g.atkMul * h.buffMul;
+  return (d.atk + g.shop.base) * levelMul(h.level) * g.atkMul * h.buffMul;
 }
 
-export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boolean }): Game {
+export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boolean; playStyle?: PlayStyle }): Game {
   const rng = mulberry32((Math.random() * 0xffffffff) | 0);
   const meta = loadMeta();
   const g: Game = {
@@ -358,6 +408,7 @@ export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boo
     dropCd: 0,
     muted: opts?.muted ?? false,
     debug: opts?.debug ?? loadDebugFlag(),
+    playStyle: opts?.playStyle ?? loadPlayStyle(),
     unlocked: ["okiku"],
     atkMul: 1,
     spdMul: 1,
@@ -385,6 +436,12 @@ export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boo
     netaReserve: NETA_RESERVE,
   };
   g.slots[STARTER_SLOT] = seedHero(g, "okiku", STARTER_SLOT);
+  const extra = extraOkikuAt(g.shop.okiku);
+  for (let i = 0; i < extra; i++) {
+    const slot = firstEmpty(g);
+    if (slot < 0) break;
+    g.slots[slot] = seedHero(g, "okiku", slot);
+  }
   for (let i = 0; i < BELT_FILL; i++) spawnBeltNeta(g);
   layoutBelt(g, true);
   refillStack(g, STACK_START);
@@ -398,13 +455,15 @@ export function resetRun(g: Game, demo = false) {
   const high = g.highWave;
   const muted = g.muted;
   const debug = g.debug;
+  const playStyle = g.playStyle;
   const bank = g.bank;
   const shop = { ...g.shop };
   const lastEarned = g.lastEarned;
-  const fresh = createGame({ demo, muted, debug });
+  const fresh = createGame({ demo, muted, debug, playStyle });
   Object.assign(g, fresh);
   g.highWave = high;
   g.debug = debug;
+  g.playStyle = playStyle;
   g.bank = bank;
   g.shop = shop;
   g.lastEarned = demo ? lastEarned : 0;
@@ -512,7 +571,7 @@ function popBall(g: Game, b: Ball) {
   float(g, b.x, b.y - 8, `+${gold}`, "#e8c15a");
   noteProcessed(g, b.kind);
   if (b.kind === "wrap") {
-    g.boss.track = Math.min(0.9, g.boss.track + 1 / BELT_SLOTS);
+    g.boss.track = Math.min(0.9, g.boss.track + wrapBackAt(g.shop.back) / BELT_SLOTS);
     float(g, g.boss.x, g.boss.y - 36, "バック", "#9ad8e8");
     if (b.gold) {
       g.goldKills += 1;
@@ -565,16 +624,10 @@ function onGoldPlate(g: Game, b: Ball) {
   g.flashT = 1.2;
 }
 
-function applyBallDmg(g: Game, b: Ball, dmg: number) {
-  hurtBall(g, b, dmg);
-}
-
-function applyBossDmg(g: Game, dmg: number) {
-  hurtBoss(g, dmg);
-}
-
 type HitResult = { applied: number; hp: number; dead: boolean };
 
+// 量の計算と HP 減算はここだけ。攻撃側（振り・弾）は「何点与えるか／死んだか」だけ見る。
+// HP を各呼び出しから直接引くと、同じ対象へ同時ヒットしたときに上書きで消える。
 function rollStrike(g: Game, h: Hero): number {
   return Math.max(1, Math.round(heroAtk(g, h) * (0.88 + g.rng() * 0.24)));
 }
@@ -734,19 +787,23 @@ function tipHits(tip: { x: number; y: number }, r: number, x: number, y: number,
 }
 
 function meleeTipTouching(g: Game, h: Hero, pos: { x: number; y: number }): boolean {
-  const tip = swingTip(h, pos.x, pos.y);
   const r = swingTipR(h);
-  for (const b of g.falling) {
-    if (b.hp > 0 && tipHits(tip, r, b.x, b.y, BALL_R)) return true;
+  const n = armCount(g.shop.arms);
+  for (let i = 0; i < n; i++) {
+    const tip = swingTip(h, pos.x, pos.y, i, n);
+    for (const b of g.falling) {
+      if (b.hp > 0 && tipHits(tip, r, b.x, b.y, BALL_R)) return true;
+    }
+    if (g.stack.length) {
+      const m = g.stack[0]!;
+      if (m.hp > 0 && tipHits(tip, r, m.x, m.y, BALL_R)) return true;
+    }
+    for (const b of g.wrap) {
+      if (b.hp > 0 && tipHits(tip, r, b.x, b.y, WRAP_ORB_R)) return true;
+    }
+    if (tipHits(tip, r, g.boss.x, g.boss.y - 10, 26)) return true;
   }
-  if (g.stack.length) {
-    const m = g.stack[0]!;
-    if (m.hp > 0 && tipHits(tip, r, m.x, m.y, BALL_R)) return true;
-  }
-  for (const b of g.wrap) {
-    if (b.hp > 0 && tipHits(tip, r, b.x, b.y, WRAP_ORB_R)) return true;
-  }
-  return tipHits(tip, r, g.boss.x, g.boss.y - 10, 26);
+  return false;
 }
 
 function pickTarget(g: Game, hx: number, hy: number, range: number, role: Role, buffMul: number): Target | null {
@@ -778,63 +835,66 @@ function pickTarget(g: Game, hx: number, hy: number, range: number, role: Role, 
 
 function meleeSweep(g: Game, h: Hero, pos: { x: number; y: number }) {
   // 体の周囲円・inPit 全当てを戻すな。当たるのは今の振りの先端だけ。
-  // 複数体は「先端に重なった相手だけ」。届いていない寿司には入らない。
+  // 輪刃は先端が何本あっても、各先端の重なりだけ。
   const amount = rollStrike(g, h);
   h.attackT = 1;
-  const tip = swingTip(h, pos.x, pos.y);
   const r = swingTipR(h);
-  h.targetX = tip.x;
-  h.targetY = tip.y;
+  const n = armCount(g.shop.arms);
+  const first = swingTip(h, pos.x, pos.y, 0, n);
+  h.targetX = first.x;
+  h.targetY = first.y;
   const multi = isMultiHit(h.level);
 
   type Hit = { kind: "ball"; b: Ball } | { kind: "boss" };
-  const overlapped: Hit[] = [];
-  const consider = (b: Ball, extra: number) => {
-    if (b.hp <= 0) return;
-    if (tipHits(tip, r, b.x, b.y, extra)) overlapped.push({ kind: "ball", b });
-  };
-  for (const b of g.falling) consider(b, BALL_R);
-  if (multi) {
-    for (const b of g.stack) consider(b, BALL_R);
-  } else if (g.stack.length) {
-    consider(g.stack[0]!, BALL_R);
-  }
-  for (const b of g.wrap) consider(b, WRAP_ORB_R);
-  if (tipHits(tip, r, g.boss.x, g.boss.y - 10, 26)) overlapped.push({ kind: "boss" });
-
-  const apply = (hit: Hit) => {
-    if (hit.kind === "boss") hurtBoss(g, amount);
-    else hurtBall(g, hit.b, amount);
-  };
-
   let hitBoss = false;
   let hitBall = false;
-  const deliver = (hit: Hit) => {
-    apply(hit);
-    if (hit.kind === "boss") hitBoss = true;
-    else hitBall = true;
+
+  const sweepTip = (tip: { x: number; y: number }) => {
+    const overlapped: Hit[] = [];
+    const consider = (b: Ball, extra: number) => {
+      if (b.hp <= 0) return;
+      if (tipHits(tip, r, b.x, b.y, extra)) overlapped.push({ kind: "ball", b });
+    };
+    for (const b of g.falling) consider(b, BALL_R);
+    if (multi) {
+      for (const b of g.stack) consider(b, BALL_R);
+    } else if (g.stack.length) {
+      consider(g.stack[0]!, BALL_R);
+    }
+    for (const b of g.wrap) consider(b, WRAP_ORB_R);
+    if (tipHits(tip, r, g.boss.x, g.boss.y - 10, 26)) overlapped.push({ kind: "boss" });
+
+    const deliver = (hit: Hit) => {
+      if (hit.kind === "boss") {
+        if (hurtBoss(g, amount)) hitBoss = true;
+      } else if (hurtBall(g, hit.b, amount)) {
+        hitBall = true;
+      }
+    };
+
+    if (multi) {
+      for (const hit of overlapped) deliver(hit);
+    } else if (overlapped.length) {
+      let best = overlapped[0]!;
+      let bestD = Infinity;
+      for (const hit of overlapped) {
+        const x = hit.kind === "boss" ? g.boss.x : hit.b.x;
+        const y = hit.kind === "boss" ? g.boss.y - 10 : hit.b.y;
+        const d = dist2(tip.x, tip.y, x, y);
+        if (d < bestD) {
+          bestD = d;
+          best = hit;
+        }
+      }
+      deliver(best);
+    }
+    slashFx(g, tip.x, tip.y);
   };
 
-  if (multi) {
-    for (const hit of overlapped) deliver(hit);
-  } else if (overlapped.length) {
-    let best = overlapped[0]!;
-    let bestD = Infinity;
-    for (const hit of overlapped) {
-      const x = hit.kind === "boss" ? g.boss.x : hit.b.x;
-      const y = hit.kind === "boss" ? g.boss.y - 10 : hit.b.y;
-      const d = dist2(tip.x, tip.y, x, y);
-      if (d < bestD) {
-        bestD = d;
-        best = hit;
-      }
-    }
-    deliver(best);
-  }
+  for (let i = 0; i < n; i++) sweepTip(swingTip(h, pos.x, pos.y, i, n));
 
   pruneDead(g);
   if (!hitBoss && hitBall && !g.demo) audio.sfxHit();
-  slashFx(g, tip.x, tip.y);
 }
 
 function fireRanged(g: Game, h: Hero, target: Target) {
@@ -850,26 +910,30 @@ function fireRanged(g: Game, h: Hero, target: Target) {
   const ang = Math.atan2(ty - pos.y, tx - pos.x);
   h.swing = ang;
 
-  const p: Projectile = {
-    id: nid(g),
-    x: pos.x + Math.cos(ang) * 22,
-    y: pos.y + Math.sin(ang) * 22 - 4,
-    vx: 0,
-    vy: 0,
-    dmg: amount,
-    life: 0.55,
-    color: def.projectile,
-    homing: true,
-    tx,
-    ty,
-    target: target.kind === "boss" ? "boss" : target.ball.kind === "wrap" ? "wrap" : "ball",
-    targetId: target.kind === "boss" ? -1 : target.ball.id,
-    multi: isMultiHit(h.level),
-  };
+  const n = armCount(g.shop.arms);
   const spd = 380;
-  p.vx = Math.cos(ang) * spd;
-  p.vy = Math.sin(ang) * spd;
-  g.projectiles.push(p);
+  const kind = target.kind === "boss" ? "boss" : target.ball.kind === "wrap" ? "wrap" : "ball";
+  const targetId = target.kind === "boss" ? -1 : target.ball.id;
+  for (let i = 0; i < n; i++) {
+    const tip = swingTip(h, pos.x, pos.y, i, n);
+    const a = Math.atan2(ty - tip.y, tx - tip.x);
+    g.projectiles.push({
+      id: nid(g),
+      x: tip.x,
+      y: tip.y,
+      vx: Math.cos(a) * spd,
+      vy: Math.sin(a) * spd,
+      dmg: amount,
+      life: 0.55,
+      color: def.projectile,
+      homing: true,
+      tx,
+      ty,
+      target: kind,
+      targetId,
+      multi: isMultiHit(h.level),
+    });
+  }
 }
 
 function findBall(g: Game, id: number): Ball | null {
@@ -919,17 +983,15 @@ function stepProjectiles(g: Game, dt: number) {
     const hitR = p.target === "boss" ? 36 : 18;
     if (Math.hypot(p.x - p.tx, p.y - p.ty) < hitR || p.life <= 0) {
       if (p.multi) {
-        const rBall = 18;
-        const ballHit = (b: Ball, extra: number) =>
-          b.hp > 0 && dist2(p.x, p.y, b.x, b.y) <= (rBall + extra) * (rBall + extra);
-        for (const b of g.falling) if (ballHit(b, BALL_R)) applyBallDmg(g, b, p.dmg);
-        for (const b of g.stack) if (ballHit(b, BALL_R)) applyBallDmg(g, b, p.dmg);
-        for (const b of g.wrap) if (ballHit(b, WRAP_ORB_R)) applyBallDmg(g, b, p.dmg);
-        if (dist2(p.x, p.y, g.boss.x, g.boss.y - 18) <= 36 * 36) applyBossDmg(g, p.dmg);
-      } else if (p.target === "boss") applyBossDmg(g, p.dmg);
+        const near = (x: number, y: number, r: number) => Math.hypot(p.x - x, p.y - y) <= r;
+        for (const b of g.falling) if (near(b.x, b.y, BALL_R + 10)) hurtBall(g, b, p.dmg);
+        for (const b of g.stack) if (near(b.x, b.y, BALL_R + 10)) hurtBall(g, b, p.dmg);
+        for (const b of g.wrap) if (near(b.x, b.y, WRAP_ORB_R + 10)) hurtBall(g, b, p.dmg);
+        if (near(g.boss.x, g.boss.y - 18, 36)) hurtBoss(g, p.dmg);
+      } else if (p.target === "boss") hurtBoss(g, p.dmg);
       else {
         const b = findBall(g, p.targetId);
-        if (b && b.hp > 0) applyBallDmg(g, b, p.dmg);
+        if (b) hurtBall(g, b, p.dmg);
       }
       burst(g, p.x, p.y, p.color, 5);
       g.projectiles.splice(i, 1);
@@ -1007,25 +1069,31 @@ export function trySummon(g: Game, opts?: { free?: boolean }): boolean {
   }
   g.summonCount += 1;
   g.summonCost = summonCostAt(g.summonCount);
-  const id = rollSummon(g);
-  g.slots[slot] = seedHero(g, id, slot);
-  const p = slotXY(slot);
-  burst(g, p.x, p.y, "#e8c15a", 10, "puff");
-  if (free) float(g, p.x, p.y - 26, "召喚", "#e8c15a");
-  if (free && g.twinSummon > 0) {
-    for (let i = 0; i < g.twinSummon; i++) {
+  placeSummon(g, slot);
+  if (free) {
+    const p = slotXY(slot);
+    float(g, p.x, p.y - 26, "召喚", "#e8c15a");
+  }
+  // 札は「壊した1回」のまま。手毬の硬さは増やさず、空きがあればもう1体。
+  if (g.twinSummon) {
+    for (let n = 0; n < g.twinSummon; n++) {
       const extra = firstEmpty(g);
       if (extra < 0) break;
-      const id2 = rollSummon(g);
-      g.slots[extra] = seedHero(g, id2, extra);
-      const p2 = slotXY(extra);
-      burst(g, p2.x, p2.y, "#c9e8ff", 8, "puff");
-      float(g, p2.x, p2.y - 26, "二重", "#c9e8ff");
+      placeSummon(g, extra);
+      const p = slotXY(extra);
+      float(g, p.x, p.y - 26, "二重", "#c9e8ff");
     }
   }
   recomputePower(g);
   if (!g.demo) audio.sfxSummon();
   return true;
+}
+
+function placeSummon(g: Game, slot: number) {
+  const id = rollSummon(g);
+  g.slots[slot] = seedHero(g, id, slot);
+  const p = slotXY(slot);
+  burst(g, p.x, p.y, "#e8c15a", 10, "puff");
 }
 
 function tryMergeOrSwap(g: Game, from: number, to: number): boolean {
@@ -1153,13 +1221,13 @@ function openRoute(g: Game) {
 function maybeEvents(g: Game) {
   if (g.demo || g.mode !== "playing") return;
   if (g.routeCount === 0) {
-    const low = g.boss.hp / g.boss.maxHp <= 0.15;
-    if (low || g.processed >= 38) {
+    const low = g.boss.hp / g.boss.maxHp <= routeHpAt(g.shop.path);
+    if (low || g.processed >= routeProcessedAt(g.shop.path)) {
       openRoute(g);
       return;
     }
   }
-  if (g.weaponCount < 3 && g.processed >= 14 + g.weaponCount * 22) {
+  if (g.weaponCount < 3 && g.processed >= weaponAt(g.weaponCount, g.shop.path)) {
     openWeapon(g);
   }
 }
@@ -1248,7 +1316,8 @@ function demoBrain(g: Game, dt: number) {
 }
 
 export function step(g: Game, dt: number) {
-  const simming = g.mode === "playing" || (g.mode === "title" && g.demo);
+  const held = g.playStyle === "manual" && !!g.drag && g.mode === "playing";
+  const simming = (g.mode === "playing" && !held) || (g.mode === "title" && g.demo);
   g.t += dt;
   g.shake = Math.max(0, g.shake - dt * 2.4);
   g.justMerged = Math.max(0, g.justMerged - dt);

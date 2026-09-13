@@ -24,10 +24,12 @@ import {
   swingLen,
   swingTip,
   swingTipR,
+  armCount,
 } from "./data";
 import type { Ball, Game, Hero } from "./types";
 
 export const SPRITES: Record<string, HTMLImageElement> = {};
+export let assetsReady = false;
 
 function loadImg(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -40,6 +42,7 @@ function loadImg(src: string): Promise<HTMLImageElement> {
 }
 
 export async function loadAssets(): Promise<void> {
+  if (assetsReady) return;
   const names = ["okiku", "mio", "kuro", "hakumen", "takaten", "oiran"] as const;
   const jobs = names.map((n) =>
     loadImg(`/assets/${n}.png`).then((img) => {
@@ -51,9 +54,15 @@ export async function loadAssets(): Promise<void> {
       SPRITES.bg = img;
     }),
   );
-  await Promise.all(jobs);
-  await document.fonts.ready.catch(() => undefined);
+  // 1枚落ちても円陣は動かす。フォント待ちは短く切る（COEP で永遠に pending になることがある）。
+  await Promise.allSettled(jobs);
+  try {
+    await Promise.race([document.fonts.ready, new Promise<void>((r) => setTimeout(r, 900))]);
+  } catch {
+    /* ignore */
+  }
   buildCaches();
+  assetsReady = true;
 }
 
 let pitLayer: HTMLCanvasElement | null = null;
@@ -407,9 +416,10 @@ function drawBelt(ctx: CanvasRenderingContext2D) {
   ctx.restore();
 }
 
-function drawPlus(ctx: CanvasRenderingContext2D, x: number, y: number, r: number) {
+function drawPlus(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, t = 0) {
   ctx.save();
-  ctx.strokeStyle = "rgba(236,228,210,0.72)";
+  const a = 0.46 + Math.sin(t * 2.1) * 0.16;
+  ctx.strokeStyle = `rgba(236,228,210,${a.toFixed(3)})`;
   ctx.lineWidth = 2;
   ctx.lineCap = "round";
   ctx.beginPath();
@@ -446,13 +456,13 @@ function drawSprite(ctx: CanvasRenderingContext2D, h: Hero, facing: number) {
   ctx.restore();
 }
 
-function drawWeapon(ctx: CanvasRenderingContext2D, h: Hero) {
+function drawWeapon(ctx: CanvasRenderingContext2D, h: Hero, swing = h.swing) {
   const def = HEROES[h.defId];
   const lv = h.level;
   const s = 0.92 + lv * 0.18;
   const atk = h.attackT;
   ctx.save();
-  ctx.rotate(h.swing);
+  ctx.rotate(swing);
   ctx.scale(s, s);
   if (atk > 0.04) {
     ctx.strokeStyle = def.projectile;
@@ -595,8 +605,15 @@ function drawHero(ctx: CanvasRenderingContext2D, g: Game, h: Hero, ox: number, o
   const bob = Math.sin(g.t * 5 + h.slot) * 1.2;
   ctx.save();
   ctx.globalAlpha = ghost ? 0.75 : 1;
+  if (ghost) {
+    ctx.translate(ox, oy + bob);
+    const lift = 1.06;
+    ctx.scale(lift, lift);
+    ctx.translate(-ox, -(oy + bob));
+  }
 
   if (g.selectedSlot === h.slot && !ghost) {
+    const n = armCount(g.shop.arms);
     const orbit = swingLen(h);
     ctx.beginPath();
     ctx.arc(ox, oy, orbit, 0, Math.PI * 2);
@@ -605,14 +622,16 @@ function drawHero(ctx: CanvasRenderingContext2D, g: Game, h: Hero, ox: number, o
     ctx.setLineDash([3, 4]);
     ctx.stroke();
     ctx.setLineDash([]);
-    const tip = swingTip(h, ox, oy);
-    ctx.beginPath();
-    ctx.arc(tip.x, tip.y, swingTipR(h), 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(232,193,90,0.22)";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(255,236,160,0.7)";
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
+    for (let i = 0; i < n; i++) {
+      const tip = swingTip(h, ox, oy, i, n);
+      ctx.beginPath();
+      ctx.arc(tip.x, tip.y, swingTipR(h), 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(232,193,90,0.22)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,236,160,0.7)";
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
   }
 
   if (h.stack >= 2 && !ghost) {
@@ -626,20 +645,17 @@ function drawHero(ctx: CanvasRenderingContext2D, g: Game, h: Hero, ox: number, o
   ctx.translate(ox, oy + bob);
   const hs = SLOT_R / 27;
   ctx.scale(hs, hs);
-  const weaponFront = Math.sin(h.swing) > -0.05;
-  if (!weaponFront) {
+  const n = armCount(g.shop.arms);
+  const frontOf = (i: number) => Math.sin(h.swing + (i * Math.PI * 2) / n) > -0.05;
+  const paint = (i: number) => {
     ctx.save();
     ctx.scale(SWING_REACH, SWING_REACH);
-    drawWeapon(ctx, h);
+    drawWeapon(ctx, h, h.swing + (i * Math.PI * 2) / n);
     ctx.restore();
-  }
+  };
+  for (let i = 0; i < n; i++) if (!frontOf(i)) paint(i);
   drawSprite(ctx, h, h.facing);
-  if (weaponFront) {
-    ctx.save();
-    ctx.scale(SWING_REACH, SWING_REACH);
-    drawWeapon(ctx, h);
-    ctx.restore();
-  }
+  for (let i = 0; i < n; i++) if (frontOf(i)) paint(i);
   ctx.restore();
   outlined(ctx, String(displayLevel(h.level)), ox, oy - SLOT_R - 4, "#fff", 11);
 }
@@ -715,14 +731,17 @@ function drawHitboxes(ctx: CanvasRenderingContext2D, g: Game) {
     const def = HEROES[h.defId];
     if (def.role === "melee") {
       const len = swingLen(h);
+      const n = armCount(g.shop.arms);
       ring(p.x, p.y, len, "rgba(50,255,140,0.7)", true);
-      const tip = swingTip(h, p.x, p.y);
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
-      ctx.lineTo(tip.x, tip.y);
-      ctx.strokeStyle = "rgba(50,255,140,0.95)";
-      ctx.stroke();
-      ring(tip.x, tip.y, swingTipR(h), "rgba(50,255,140,0.95)");
+      for (let i = 0; i < n; i++) {
+        const tip = swingTip(h, p.x, p.y, i, n);
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(tip.x, tip.y);
+        ctx.strokeStyle = "rgba(50,255,140,0.95)";
+        ctx.stroke();
+        ring(tip.x, tip.y, swingTipR(h), "rgba(50,255,140,0.95)");
+      }
     } else {
       ring(p.x, p.y, def.range, "rgba(80,200,255,0.75)", true);
     }
@@ -800,35 +819,6 @@ function drawHud(ctx: CanvasRenderingContext2D, g: Game) {
   ctx.restore();
 }
 
-function drawMute(ctx: CanvasRenderingContext2D, g: Game) {
-  ctx.save();
-  ctx.translate(366, 812);
-  ctx.strokeStyle = "rgba(232,220,200,0.8)";
-  ctx.lineWidth = 1.6;
-  ctx.beginPath();
-  ctx.moveTo(-7, -4);
-  ctx.lineTo(-2, -4);
-  ctx.lineTo(4, -8);
-  ctx.lineTo(4, 8);
-  ctx.lineTo(-2, 4);
-  ctx.lineTo(-7, 4);
-  ctx.closePath();
-  ctx.stroke();
-  if (g.muted) {
-    ctx.beginPath();
-    ctx.moveTo(7, -6);
-    ctx.lineTo(13, 6);
-    ctx.moveTo(13, -6);
-    ctx.lineTo(7, 6);
-    ctx.stroke();
-  } else {
-    ctx.beginPath();
-    ctx.arc(4, 0, 8, -0.6, 0.6);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
 function coverImage(ctx: CanvasRenderingContext2D, img: HTMLImageElement, w: number, h: number) {
   const ir = img.width / img.height;
   const cr = w / h;
@@ -851,7 +841,7 @@ export function draw(ctx: CanvasRenderingContext2D, g: Game) {
   ctx.save();
   const sh = g.shake * g.shake;
   if (sh > 0.002) {
-    ctx.translate((Math.random() - 0.5) * 10 * sh, (Math.random() - 0.5) * 10 * sh);
+    ctx.translate(Math.sin(g.t * 47.3) * 9 * sh, Math.sin(g.t * 31.1 + 1.7) * 9 * sh);
   }
 
   ctx.fillStyle = "#1c1510";
@@ -903,8 +893,8 @@ export function draw(ctx: CanvasRenderingContext2D, g: Game) {
   for (let i = 0; i < SLOT_COUNT; i++) {
     if (g.slots[i] && !(g.drag && g.drag.slot === i)) continue;
     const p = slotXY(i);
-    if (g.drag && g.drag.slot === i) drawPlus(ctx, p.x, p.y, SLOT_R);
-    else if (!g.slots[i]) drawPlus(ctx, p.x, p.y, SLOT_R);
+    if (g.drag && g.drag.slot === i) drawPlus(ctx, p.x, p.y, SLOT_R, g.t);
+    else if (!g.slots[i]) drawPlus(ctx, p.x, p.y, SLOT_R, g.t);
   }
 
   for (let i = g.wrap.length - 1; i >= 0; i--) {
@@ -999,15 +989,16 @@ export function draw(ctx: CanvasRenderingContext2D, g: Game) {
   }
 
   for (const f of g.floats) {
-    const life = f.scale > 1.4 ? 0.9 : 0.7;
-    ctx.globalAlpha = Math.max(0, f.life / life);
-    const sz = f.text === "BOOM!" ? 22 * f.scale * 0.55 : 12;
+    const maxL = f.scale > 1.4 ? 0.9 : 0.7;
+    const u = 1 - Math.max(0, f.life) / maxL;
+    const pop = u < 0.2 ? 1 + Math.sin((u / 0.2) * Math.PI) * 0.22 : 1;
+    ctx.globalAlpha = Math.max(0, f.life / maxL);
+    const sz = (f.text === "BOOM!" ? 22 * f.scale * 0.55 : 12) * pop;
     outlined(ctx, f.text, f.x, f.y, f.color, sz);
     ctx.globalAlpha = 1;
   }
 
   drawHud(ctx, g);
-  drawMute(ctx, g);
   if (g.debug) drawHitboxes(ctx, g);
   if (g.mode === "buff") drawBuffMenu(ctx, g);
 

@@ -2,6 +2,7 @@ export type HeroId = "okiku" | "mio" | "kuro" | "hakumen" | "takaten";
 export type Rarity = "common" | "rare" | "elite";
 export type Role = "melee" | "ranged";
 export type BallKind = "stack" | "fall" | "wrap";
+export type PlayStyle = "active" | "manual";
 export type Mode = "title" | "playing" | "paused" | "weapon" | "route" | "buff" | "fail";
 
 export interface HeroDef {
@@ -61,7 +62,7 @@ export interface Projectile {
   ty: number;
   target: "ball" | "boss" | "wrap";
   targetId: number;
-  multi: boolean;
+  multi?: boolean;
 }
 
 export interface Particle {
@@ -102,11 +103,17 @@ export interface RouteOption {
   atkMul: number;
 }
 
-export type ShopId = "atk" | "spd" | "coin";
+export type ShopId = "atk" | "spd" | "coin" | "okiku" | "path" | "base" | "seed" | "back" | "arms";
 export interface ShopUpgrades {
   atk: number;
   spd: number;
   coin: number;
+  okiku: number;
+  path: number;
+  base: number;
+  seed: number;
+  back: number;
+  arms: number;
 }
 
 export interface DragState {
@@ -148,17 +155,18 @@ export interface Game {
   dropCd: number;
   muted: boolean;
   debug: boolean;
+  playStyle: PlayStyle;
   unlocked: HeroId[];
   atkMul: number;
   spdMul: number;
   goldMul: number;
+  twinSummon: number;
   rng: () => number;
   nextId: number;
   highWave: number;
   bank: number;
   shop: ShopUpgrades;
   lastEarned: number;
-  twinSummon: number;
   weaponOptions: WeaponOption[];
   buffOptions: WeaponOption[];
   routeOptions: RouteOption[];

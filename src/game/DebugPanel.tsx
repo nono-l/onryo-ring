@@ -1,12 +1,18 @@
 import type { Game } from "./types";
 import type { DebugField } from "./sim";
-import { debugNudge, debugOpenBuff, debugOpenRoute, debugOpenWeapon, debugUnlockAll, setDebugMode } from "./sim";
+import { debugNudge, debugOpenBuff, debugOpenRoute, debugOpenWeapon, debugUnlockAll, setDebugMode, setPlayStyle } from "./sim";
 
 const ROWS: Array<{ id: DebugField; label: string; fmt: (g: Game) => string }> = [
   { id: "bank", label: "所持両", fmt: (g) => String(g.bank) },
   { id: "shopAtk", label: "店・攻撃Lv", fmt: (g) => String(g.shop.atk) },
   { id: "shopSpd", label: "店・速度Lv", fmt: (g) => String(g.shop.spd) },
   { id: "shopCoin", label: "店・開始両Lv", fmt: (g) => String(g.shop.coin) },
+  { id: "shopOkiku", label: "店・二人目Lv", fmt: (g) => String(g.shop.okiku) },
+  { id: "shopPath", label: "店・道Lv", fmt: (g) => String(g.shop.path) },
+  { id: "shopBase", label: "店・基礎攻撃", fmt: (g) => String(1 + g.shop.base) },
+  { id: "shopSeed", label: "店・口寄せ", fmt: (g) => String(g.shop.seed) },
+  { id: "shopBack", label: "店・押し戻し", fmt: (g) => String(g.shop.back) },
+  { id: "shopArms", label: "店・輪刃", fmt: (g) => String(1 + g.shop.arms) },
   { id: "coins", label: "ランの両", fmt: (g) => String(g.coins) },
   { id: "wave", label: "WAVE", fmt: (g) => String(g.wave) },
   { id: "highWave", label: "最高WAVE", fmt: (g) => String(g.highWave) },
@@ -40,60 +46,94 @@ export function SettingsPanel({
     onChange();
   };
   return (
-    <div className="overlay-scrim">
+    <div className="overlay-scrim is-shop">
       <div className="overlay-panel enter shop-panel">
-        <div className="ribbon stagger">設定</div>
-        <p className="shop-hint stagger">開発中。誰でもデバッグを付けられます。</p>
-        <button
-          type="button"
-          className={`debug-switch stagger${g.debug ? " on" : ""}`}
-          onClick={() => {
-            setDebugMode(g, !g.debug);
-            onChange();
-          }}
-        >
-          デバッグ {g.debug ? "ON" : "OFF"}
-        </button>
-        {g.debug && (
-          <>
-            <p className="shop-hint">ヒットボックスを出し、数値を増減できます。</p>
-            <div className="shop-list debug-list">
-              {ROWS.map((row) => (
-                <div key={row.id} className="debug-row">
-                  <div className="shop-copy">
-                    <div className="nm">{row.label}</div>
-                    <div className="lv">{row.fmt(g)}</div>
+        <div className="shop-head">
+          <div className="ribbon stagger">設定</div>
+          <p className="shop-hint stagger">操作</p>
+          <div className="play-style stagger">
+            <button
+              type="button"
+              className={`debug-switch${g.playStyle === "active" ? " on" : ""}`}
+              onClick={() => {
+                setPlayStyle(g, "active");
+                onChange();
+              }}
+            >
+              アクティブ
+            </button>
+            <button
+              type="button"
+              className={`debug-switch${g.playStyle === "manual" ? " on" : ""}`}
+              onClick={() => {
+                setPlayStyle(g, "manual");
+                onChange();
+              }}
+            >
+              マニュアル
+            </button>
+          </div>
+          <p className="shop-hint stagger">
+            {g.playStyle === "manual"
+              ? "ユニットを動かしている間、円陣は休止と同じく止まる。"
+              : "動かしながら戦う。今までの仕様。"}
+          </p>
+        </div>
+        <div className="shop-scroll">
+          <p className="shop-hint stagger">開発中。誰でもデバッグを付けられます。</p>
+          <button
+            type="button"
+            className={`debug-switch stagger${g.debug ? " on" : ""}`}
+            onClick={() => {
+              setDebugMode(g, !g.debug);
+              onChange();
+            }}
+          >
+            デバッグ {g.debug ? "ON" : "OFF"}
+          </button>
+          {g.debug && (
+            <>
+              <p className="shop-hint">ヒットボックスを出し、数値を増減できます。</p>
+              <div className="shop-list debug-list">
+                {ROWS.map((row) => (
+                  <div key={row.id} className="debug-row">
+                    <div className="shop-copy">
+                      <div className="nm">{row.label}</div>
+                      <div className="lv">{row.fmt(g)}</div>
+                    </div>
+                    <div className="debug-step">
+                      <button type="button" onClick={() => bump(row.id, -1)} aria-label="減らす">
+                        −
+                      </button>
+                      <button type="button" onClick={() => bump(row.id, 1)} aria-label="増やす">
+                        ＋
+                      </button>
+                    </div>
                   </div>
-                  <div className="debug-step">
-                    <button type="button" onClick={() => bump(row.id, -1)} aria-label="減らす">
-                      −
-                    </button>
-                    <button type="button" onClick={() => bump(row.id, 1)} aria-label="増やす">
-                      ＋
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="debug-actions">
-              <button type="button" className="ghost-btn" onClick={() => { debugUnlockAll(g); onChange(); }}>
-                式神を全解禁
-              </button>
-              <button type="button" className="ghost-btn" onClick={() => { debugOpenWeapon(g); onClose(); onChange(); }}>
-                武器3択
-              </button>
-              <button type="button" className="ghost-btn" onClick={() => { debugOpenRoute(g); onClose(); onChange(); }}>
-                上級の道
-              </button>
-              <button type="button" className="ghost-btn" onClick={() => { debugOpenBuff(g); onClose(); onChange(); }}>
-                金皿3択
-              </button>
-            </div>
-          </>
-        )}
-        <button type="button" className="ghost-btn stagger" onClick={onClose}>
-          閉じる
-        </button>
+                ))}
+              </div>
+              <div className="debug-actions">
+                <button type="button" className="ghost-btn" onClick={() => { debugUnlockAll(g); onChange(); }}>
+                  式神を全解禁
+                </button>
+                <button type="button" className="ghost-btn" onClick={() => { debugOpenWeapon(g); onClose(); onChange(); }}>
+                  武器3択
+                </button>
+                <button type="button" className="ghost-btn" onClick={() => { debugOpenRoute(g); onClose(); onChange(); }}>
+                  上級の道
+                </button>
+                <button type="button" className="ghost-btn" onClick={() => { debugOpenBuff(g); onClose(); onChange(); }}>
+                  金皿3択
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="shop-foot">
+          <button type="button" className="ghost-btn stagger" onClick={onClose}>
+            閉じる
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -1,3 +1,4 @@
+-- 式神強化と最高WAVEを Google / ゲートログインの user_id に紐づける。
 create table if not exists player_saves (
   user_id    text primary key,
   high_wave  integer not null default 0,

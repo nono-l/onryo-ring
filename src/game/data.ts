@@ -188,11 +188,15 @@ export function swingTip(
   h: { defId: HeroId; level: number; swing: number },
   x: number,
   y: number,
+  arm = 0,
+  arms = 1,
 ): { x: number; y: number } {
+  const n = Math.max(1, arms);
+  const a = h.swing + (arm * Math.PI * 2) / n;
   const len = swingLen(h);
   return {
-    x: x - Math.sin(h.swing) * len,
-    y: y + Math.cos(h.swing) * len,
+    x: x - Math.sin(a) * len,
+    y: y + Math.cos(a) * len,
   };
 }
 
@@ -360,22 +364,129 @@ export function routeFor(wave: number): RouteOption[] {
 
 export const SAVE_KEY = "onryo-ring-v1";
 export const DEBUG_KEY = "onryo-ring-debug";
+export const PLAY_KEY = "onryo-ring-play";
 
 export const START_COINS = 60;
 export const SHOP_MAX = 12;
+export const SHOP_T2_OKIKU_MAX = 5;
+export const SHOP_T2_PATH_MAX = 5;
+export const SHOP_T2_BASE_MAX = 6;
+export const SHOP_T3_MAX = 5;
+export const SHOP_T3_SPEND = 10000;
+export const SHOP_T3_MIN_LV = 2;
 
 export function emptyShop(): ShopUpgrades {
-  return { atk: 0, spd: 0, coin: 0 };
+  return { atk: 0, spd: 0, coin: 0, okiku: 0, path: 0, base: 0, seed: 0, back: 0, arms: 0 };
 }
 
-export function shopCost(lv: number): number {
+export function readShop(p?: Partial<ShopUpgrades> | null): ShopUpgrades {
+  const e = emptyShop();
+  if (!p) return e;
+  return {
+    atk: p.atk ?? 0,
+    spd: p.spd ?? 0,
+    coin: p.coin ?? 0,
+    okiku: p.okiku ?? 0,
+    path: p.path ?? 0,
+    base: p.base ?? 0,
+    seed: p.seed ?? 0,
+    back: p.back ?? 0,
+    arms: p.arms ?? (p as { luck?: number }).luck ?? 0,
+  };
+}
+
+export function shopT1Maxed(shop: ShopUpgrades): boolean {
+  return shop.atk >= SHOP_MAX && shop.spd >= SHOP_MAX && shop.coin >= SHOP_MAX;
+}
+
+export function shopMax(id: ShopId): number {
+  if (id === "okiku") return SHOP_T2_OKIKU_MAX;
+  if (id === "path") return SHOP_T2_PATH_MAX;
+  if (id === "base") return SHOP_T2_BASE_MAX;
+  if (id === "seed" || id === "back" || id === "arms") return SHOP_T3_MAX;
+  return SHOP_MAX;
+}
+
+export function isShopT2(id: ShopId): boolean {
+  return id === "okiku" || id === "path" || id === "base";
+}
+
+export function isShopT3(id: ShopId): boolean {
+  return id === "seed" || id === "back" || id === "arms";
+}
+
+export const SHOP_T2_IDS: ShopId[] = ["okiku", "path", "base"];
+
+export function extraOkikuAt(lv: number): number {
+  const n = Math.max(0, lv);
+  return (n * (n + 1)) / 2;
+}
+
+export function weaponAt(count: number, path: number): number {
+  const n = Math.max(0, path);
+  const base = Math.max(1, Math.round(14 * 0.5 ** n));
+  const step = Math.max(2, Math.round(22 * 0.55 ** n));
+  return base + count * step;
+}
+
+export function routeProcessedAt(path: number): number {
+  return Math.max(1, Math.round(38 * 0.5 ** Math.max(0, path)));
+}
+
+export function routeHpAt(path: number): number {
+  return Math.min(0.8, 0.15 + Math.max(0, path) * 0.15);
+}
+
+export function wrapBackAt(lv: number): number {
+  return 1 + Math.max(0, lv) * 0.5;
+}
+
+export function armCount(lv: number): number {
+  return 1 + Math.max(0, lv);
+}
+
+export function shopCost(id: ShopId, lv: number): number {
+  if (id === "okiku") return 120 * 2 ** lv;
+  if (id === "path") return 400 * 4 ** lv;
+  if (id === "base") return 500 * 3 ** lv;
+  if (id === "seed" || id === "back" || id === "arms") return 800 * 3 ** lv;
   return 25 + lv * 20;
+}
+
+export function shopSpent(ids: ShopId[], shop: ShopUpgrades): number {
+  let n = 0;
+  for (const id of ids) {
+    const lv = shop[id] ?? 0;
+    for (let i = 0; i < lv; i++) n += shopCost(id, i);
+  }
+  return n;
+}
+
+export function shopT2Spent(shop: ShopUpgrades): number {
+  return shopSpent(SHOP_T2_IDS, shop);
+}
+
+export function shopT3Open(shop: ShopUpgrades): boolean {
+  return (
+    shop.okiku >= SHOP_T3_MIN_LV &&
+    shop.path >= SHOP_T3_MIN_LV &&
+    shop.base >= SHOP_T3_MIN_LV &&
+    shopT2Spent(shop) >= SHOP_T3_SPEND
+  );
 }
 
 export function shopValue(id: ShopId, lv: number): string {
   if (id === "atk") return `攻撃 ×${(1 + lv * 0.12).toFixed(2)}`;
   if (id === "spd") return `速度 ×${(1 + lv * 0.07).toFixed(2)}`;
-  return `開始 ${START_COINS + lv * 15} 両`;
+  if (id === "coin") return `開始 ${START_COINS + lv * 15} 両`;
+  if (id === "okiku") return `開始 お菊 ${1 + extraOkikuAt(lv)} 体`;
+  if (id === "path") {
+    return `武器 ${weaponAt(0, lv)}/${weaponAt(1, lv)}/${weaponAt(2, lv)}　道 ${routeProcessedAt(lv)}`;
+  }
+  if (id === "base") return `基礎攻撃 ${1 + lv}`;
+  if (id === "seed") return `手毬1つ +${lv} 体`;
+  if (id === "back") return `バック ${wrapBackAt(lv)} 皿`;
+  return `武器 ${armCount(lv)} 本`;
 }
 
 export function runBankGain(coins: number, wave: number): number {
@@ -388,3 +499,14 @@ export const SHOP_ITEMS: Array<{ id: ShopId; name: string; desc: string }> = [
   { id: "coin", name: "開始の両", desc: "次の挑戦の所持両" },
 ];
 
+export const SHOP_T2_ITEMS: Array<{ id: ShopId; name: string; desc: string }> = [
+  { id: "okiku", name: "二人目", desc: "開始時お菊が増える。買うほど一気に増える" },
+  { id: "path", name: "道が近い", desc: "買うたび待ちがだいたい半分。値段は 400、1600、6400…" },
+  { id: "base", name: "基礎攻撃力", desc: "式神の基礎攻撃 1 を上げる。値段は急に跳ねる" },
+];
+
+export const SHOP_T3_ITEMS: Array<{ id: ShopId; name: string; desc: string }> = [
+  { id: "seed", name: "口寄せの種", desc: "最初から、手毬1つにつき式神がもう出る" },
+  { id: "back", name: "押し戻し", desc: "寿司を倒したときの花魁バックが増える" },
+  { id: "arms", name: "輪刃", desc: "振り回す武器が増える。円に等間隔" },
+];
