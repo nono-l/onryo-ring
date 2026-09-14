@@ -20,6 +20,7 @@ import {
   beltPose,
   buffCardRect,
   displayLevel,
+  isMultiHit,
   slotXY,
   swingLen,
   swingTip,
@@ -729,7 +730,7 @@ function drawHitboxes(ctx: CanvasRenderingContext2D, g: Game) {
     const h = g.slots[i];
     if (!h) continue;
     const def = HEROES[h.defId];
-    if (def.role === "melee") {
+    if (def.role === "melee" || isMultiHit(h.level)) {
       const len = swingLen(h);
       const n = armCount(g.shop.arms);
       ring(p.x, p.y, len, "rgba(50,255,140,0.7)", true);
@@ -815,6 +816,14 @@ function drawHud(ctx: CanvasRenderingContext2D, g: Game) {
   ctx.font = '700 14px "Zen Kaku Gothic New", sans-serif';
   ctx.fillStyle = "#e8c15a";
   ctx.fillText(coinStr, VW - 14, 23);
+
+  if (g.voiceOn) {
+    const t = Math.max(0, Math.min(1, (g.screamMul - 1) / 29));
+    ctx.fillStyle = "rgba(18,14,10,0.55)";
+    ctx.fillRect(VW / 2 - 52, 33, 104, 6);
+    ctx.fillStyle = t > 0.72 ? "#e85a4a" : "#e8c15a";
+    ctx.fillRect(VW / 2 - 52, 33, 104 * t, 6);
+  }
 
   ctx.restore();
 }

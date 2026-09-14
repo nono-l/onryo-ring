@@ -247,7 +247,7 @@ export function summonCostAt(count: number): number {
 }
 
 /** Same counter as summon cost: n=0..2 → 2, then 6, 9/18, 15/35… */
-export function temariHpAt(count: number, rng: () => number, wave = 1): number {
+export function temariHpAt(count: number, rng: () => number, wave = 1, thin = 0): number {
   let mul: number;
   if (count <= 2) mul = 1;
   else if (count <= 5) mul = 3;
@@ -261,19 +261,20 @@ export function temariHpAt(count: number, rng: () => number, wave = 1): number {
     mul = (r > 0.8 ? 16 : r > 0.4 ? 9 : 6) * grow;
   }
   const waveMul = Math.pow(1.28, Math.max(0, wave - 1));
-  return Math.max(1, Math.round(2 * mul * waveMul));
+  return Math.max(1, Math.round(2 * mul * waveMul * temariThinAt(thin)));
 }
 
 export function makeWave(
   wave: number,
   rng: () => number,
   startN = 0,
+  thin = 0,
 ): Array<{ hp: number; pattern: number }> {
   const count = 18 + wave * 7;
   const out: Array<{ hp: number; pattern: number }> = [];
   for (let i = 0; i < count; i++) {
     out.push({
-      hp: temariHpAt(startN + i, rng, wave),
+      hp: temariHpAt(startN + i, rng, wave, thin),
       pattern: (i + wave * 3) % 5,
     });
   }
@@ -297,7 +298,7 @@ export function displayLevel(level: number): number {
   return 2 * level - 1;
 }
 
-/** 表示10まで単体。それを超えたら、重なっている当たり判定には全部入る。範囲ダメにはしない。 */
+/** 表示10まで単体。11以上は弾を出さず、先端が通った寿司すべてに入る。 */
 export function isMultiHit(level: number): boolean {
   return displayLevel(level) > 10;
 }
@@ -365,6 +366,8 @@ export function routeFor(wave: number): RouteOption[] {
 export const SAVE_KEY = "onryo-ring-v1";
 export const DEBUG_KEY = "onryo-ring-debug";
 export const PLAY_KEY = "onryo-ring-play";
+export const AUTO_KEY = "onryo-ring-auto";
+export const VOICE_KEY = "onryo-ring-voice";
 
 export const START_COINS = 60;
 export const SHOP_MAX = 12;
@@ -374,9 +377,16 @@ export const SHOP_T2_BASE_MAX = 6;
 export const SHOP_T3_MAX = 5;
 export const SHOP_T3_SPEND = 10000;
 export const SHOP_T3_MIN_LV = 2;
+export const SHOP_T4_MAX = 5;
+export const SHOP_T4_SPEND = 10000;
+export const SHOP_T4_MIN_LV = 2;
+export const SHOP_AUTO_COST = 500_000;
+export const SHOP_AUTO_MAX = 1;
 
 export function emptyShop(): ShopUpgrades {
-  return { atk: 0, spd: 0, coin: 0, okiku: 0, path: 0, base: 0, seed: 0, back: 0, arms: 0 };
+  return {
+    atk: 0, spd: 0, coin: 0, okiku: 0, path: 0, base: 0, seed: 0, back: 0, arms: 0, slow: 0, thin: 0, auto: 0,
+  };
 }
 
 export function readShop(p?: Partial<ShopUpgrades> | null): ShopUpgrades {
@@ -392,6 +402,9 @@ export function readShop(p?: Partial<ShopUpgrades> | null): ShopUpgrades {
     seed: p.seed ?? 0,
     back: p.back ?? 0,
     arms: p.arms ?? (p as { luck?: number }).luck ?? 0,
+    slow: p.slow ?? 0,
+    thin: p.thin ?? 0,
+    auto: p.auto ?? 0,
   };
 }
 
@@ -404,6 +417,8 @@ export function shopMax(id: ShopId): number {
   if (id === "path") return SHOP_T2_PATH_MAX;
   if (id === "base") return SHOP_T2_BASE_MAX;
   if (id === "seed" || id === "back" || id === "arms") return SHOP_T3_MAX;
+  if (id === "slow" || id === "thin") return SHOP_T4_MAX;
+  if (id === "auto") return SHOP_AUTO_MAX;
   return SHOP_MAX;
 }
 
@@ -415,7 +430,12 @@ export function isShopT3(id: ShopId): boolean {
   return id === "seed" || id === "back" || id === "arms";
 }
 
+export function isShopT4(id: ShopId): boolean {
+  return id === "slow" || id === "thin" || id === "auto";
+}
+
 export const SHOP_T2_IDS: ShopId[] = ["okiku", "path", "base"];
+export const SHOP_T3_IDS: ShopId[] = ["seed", "back", "arms"];
 
 export function extraOkikuAt(lv: number): number {
   const n = Math.max(0, lv);
@@ -445,11 +465,21 @@ export function armCount(lv: number): number {
   return 1 + Math.max(0, lv);
 }
 
+export function oiranPaceAt(lv: number): number {
+  return Math.max(0.2, 1 - 0.12 * Math.max(0, lv));
+}
+
+export function temariThinAt(lv: number): number {
+  return 0.82 ** Math.max(0, lv);
+}
+
 export function shopCost(id: ShopId, lv: number): number {
   if (id === "okiku") return 120 * 2 ** lv;
   if (id === "path") return 400 * 4 ** lv;
   if (id === "base") return 500 * 3 ** lv;
   if (id === "seed" || id === "back" || id === "arms") return 800 * 3 ** lv;
+  if (id === "slow" || id === "thin") return 2000 * 3 ** lv;
+  if (id === "auto") return SHOP_AUTO_COST;
   return 25 + lv * 20;
 }
 
@@ -466,12 +496,25 @@ export function shopT2Spent(shop: ShopUpgrades): number {
   return shopSpent(SHOP_T2_IDS, shop);
 }
 
+export function shopT3Spent(shop: ShopUpgrades): number {
+  return shopSpent(SHOP_T3_IDS, shop);
+}
+
 export function shopT3Open(shop: ShopUpgrades): boolean {
   return (
     shop.okiku >= SHOP_T3_MIN_LV &&
     shop.path >= SHOP_T3_MIN_LV &&
     shop.base >= SHOP_T3_MIN_LV &&
     shopT2Spent(shop) >= SHOP_T3_SPEND
+  );
+}
+
+export function shopT4Open(shop: ShopUpgrades): boolean {
+  return (
+    shop.seed >= SHOP_T4_MIN_LV &&
+    shop.back >= SHOP_T4_MIN_LV &&
+    shop.arms >= SHOP_T4_MIN_LV &&
+    shopT3Spent(shop) >= SHOP_T4_SPEND
   );
 }
 
@@ -486,7 +529,10 @@ export function shopValue(id: ShopId, lv: number): string {
   if (id === "base") return `基礎攻撃 ${1 + lv}`;
   if (id === "seed") return `手毬1つ +${lv} 体`;
   if (id === "back") return `バック ${wrapBackAt(lv)} 皿`;
-  return `武器 ${armCount(lv)} 本`;
+  if (id === "arms") return `武器 ${armCount(lv)} 本`;
+  if (id === "slow") return `花魁 ${Math.round(oiranPaceAt(lv) * 100)}%`;
+  if (id === "thin") return `手毬 HP ×${temariThinAt(lv).toFixed(2)}`;
+  return lv > 0 ? "設定で切替" : "未解禁";
 }
 
 export function runBankGain(coins: number, wave: number): number {
@@ -510,3 +556,10 @@ export const SHOP_T3_ITEMS: Array<{ id: ShopId; name: string; desc: string }> = 
   { id: "back", name: "押し戻し", desc: "寿司を倒したときの花魁バックが増える" },
   { id: "arms", name: "輪刃", desc: "振り回す武器が増える。円に等間隔" },
 ];
+
+export const SHOP_T4_ITEMS: Array<{ id: ShopId; name: string; desc: string }> = [
+  { id: "slow", name: "足枷", desc: "花魁の歩みが遅くなる" },
+  { id: "thin", name: "薄皮", desc: "手毬の耐久が下がる。召喚しやすくなる" },
+  { id: "auto", name: "自動重ね", desc: "同じレベルが3体そろうと重ねる。設定で切替。50万両" },
+];
+

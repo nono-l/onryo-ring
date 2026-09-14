@@ -43,9 +43,12 @@ export interface Hero {
   facing: 1 | -1;
   attackT: number;
   swing: number;
+  prevSwing: number;
+  cleaveIds: number[];
   targetX: number;
   targetY: number;
   buffMul: number;
+  rank: number;
 }
 
 export interface Projectile {
@@ -62,7 +65,7 @@ export interface Projectile {
   ty: number;
   target: "ball" | "boss" | "wrap";
   targetId: number;
-  multi?: boolean;
+  multi: boolean;
 }
 
 export interface Particle {
@@ -103,7 +106,19 @@ export interface RouteOption {
   atkMul: number;
 }
 
-export type ShopId = "atk" | "spd" | "coin" | "okiku" | "path" | "base" | "seed" | "back" | "arms";
+export type ShopId =
+  | "atk"
+  | "spd"
+  | "coin"
+  | "okiku"
+  | "path"
+  | "base"
+  | "seed"
+  | "back"
+  | "arms"
+  | "slow"
+  | "thin"
+  | "auto";
 export interface ShopUpgrades {
   atk: number;
   spd: number;
@@ -114,6 +129,9 @@ export interface ShopUpgrades {
   seed: number;
   back: number;
   arms: number;
+  slow: number;
+  thin: number;
+  auto: number;
 }
 
 export interface DragState {
@@ -149,6 +167,7 @@ export interface Game {
   floats: FloatText[];
   selectedSlot: number | null;
   drag: DragState | null;
+  moveSeq: number;
   shake: number;
   hitstop: number;
   spawnQueue: Array<{ hp: number; pattern: number }>;
@@ -156,17 +175,20 @@ export interface Game {
   muted: boolean;
   debug: boolean;
   playStyle: PlayStyle;
+  autoMerge: boolean;
+  voiceOn: boolean;
+  screamMul: number;
   unlocked: HeroId[];
   atkMul: number;
   spdMul: number;
   goldMul: number;
-  twinSummon: number;
   rng: () => number;
   nextId: number;
   highWave: number;
   bank: number;
   shop: ShopUpgrades;
   lastEarned: number;
+  twinSummon: number;
   weaponOptions: WeaponOption[];
   buffOptions: WeaponOption[];
   routeOptions: RouteOption[];

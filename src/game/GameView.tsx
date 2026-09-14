@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "@tanstack/react-router";
 import { UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { loadCloudSave, putCloudSave } from "@/server/saves";
-import { SHOP_ITEMS, SHOP_T2_ITEMS, SHOP_T3_ITEMS, SHOP_T3_SPEND, VH, VW, shopCost, shopMax, shopT1Maxed, shopT2Spent, shopT3Open, shopValue } from "./data";
+import { SHOP_ITEMS, SHOP_T2_ITEMS, SHOP_T3_ITEMS, SHOP_T4_ITEMS, SHOP_T3_SPEND, SHOP_T4_SPEND, VH, VW, shopCost, shopMax, shopT1Maxed, shopT2Spent, shopT3Open, shopT3Spent, shopT4Open, shopValue } from "./data";
+import { DebugDock, SettingsPanel } from "./DebugPanel";
 import { draw, loadAssets } from "./draw";
 import {
   applyMeta,
@@ -22,10 +22,11 @@ import {
   snapshotMeta,
   step,
 } from "./sim";
-import { DebugDock, SettingsPanel } from "./DebugPanel";
-import type { Game, ShopId } from "./types";
+import type { Game } from "./types";
+import type { ShopId } from "./types";
 import type { DebugField } from "./sim";
 import * as audio from "./audio";
+import { startVoice } from "./mic";
 
 type OverlayKind = "title" | "none" | "weapon" | "route" | "buff" | "fail" | "paused";
 
@@ -39,6 +40,7 @@ export function GameView() {
   const [muted, setMuted] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const { user, isPending } = useCurrentUserState();
 
   useEffect(() => {
     let cancelled = false;
@@ -95,96 +97,58 @@ export function GameView() {
     raf = requestAnimationFrame(loop);
 
     const onVis = () => {
-      if (document.visibilityState === "visible") {
+      if (document.visibilityState === "hidden") {
+        if (game.mode === "playing") {
+          setMode(game, "paused");
+          setKind("paused");
+        }
+      } else {
         audio.resumeIfNeeded();
-        return;
       }
-      if (game.mode === "playing") {
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && game.mode === "playing") {
         setMode(game, "paused");
         setKind("paused");
       }
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "m" || e.key === "M") {
-        game.muted = !game.muted;
-        audio.setMuted(game.muted);
-        setMuted(game.muted);
-        return;
-      }
-      if (e.key === "Escape") {
-        if (game.mode === "playing") {
-          setMode(game, "paused");
-          setKind("paused");
-        } else if (game.mode === "paused") {
-          setMode(game, "playing");
-          setKind("none");
-        }
-      }
-    };
     document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("resize", fit);
     window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", fit);
 
     return () => {
       cancelAnimationFrame(raf);
       document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("resize", fit);
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", fit);
     };
   }, []);
 
-  const { user, isPending } = useCurrentUserState();
-
   useEffect(() => {
-    if (isPending) return;
     if (!user) {
       setCloudFlush(null);
       return;
     }
-    let alive = true;
-    let timer: number | null = null;
+    let cancelled = false;
     void loadCloudSave()
       .then((remote) => {
-        if (!alive) return;
-        const game = gameRef.current;
-        if (!game) return;
-        const local = snapshotMeta(game);
-        const merged = remote
-          ? mergeMeta(local, {
-              highWave: remote.highWave,
-              bank: remote.bank,
-              shop: remote.shop,
-            })
-          : local;
-        applyMeta(game, merged);
-        setTick((n) => n + 1);
-        return putCloudSave({
-          data: {
-            highWave: merged.highWave,
-            bank: merged.bank,
-            shop: merged.shop,
-          },
+        const g = gameRef.current;
+        if (cancelled || !g) return;
+        if (remote) {
+          applyMeta(g, mergeMeta(snapshotMeta(g), { version: 2, ...remote }));
+        }
+        setCloudFlush((m) => {
+          void putCloudSave({ data: { highWave: m.highWave, bank: m.bank, shop: m.shop } }).catch(
+            () => {},
+          );
         });
+        setTick((n) => n + 1);
       })
-      .catch(() => undefined);
-    setCloudFlush((m) => {
-      if (timer) window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        void putCloudSave({
-          data: {
-            highWave: m.highWave,
-            bank: m.bank,
-            shop: m.shop,
-          },
-        }).catch(() => undefined);
-      }, 450);
-    });
+      .catch(() => {});
     return () => {
-      alive = false;
-      setCloudFlush(null);
-      if (timer) window.clearTimeout(timer);
+      cancelled = true;
     };
-  }, [user, isPending]);
+  }, [user]);
 
   useEffect(() => {
     if (kind !== "weapon") return;
@@ -192,14 +156,6 @@ export function GameView() {
     const t = window.setTimeout(() => setHexOnly(false), 1150);
     return () => window.clearTimeout(t);
   }, [kind, tick]);
-
-  const toggleMute = () => {
-    const g = gameRef.current;
-    if (!g) return;
-    g.muted = !g.muted;
-    audio.setMuted(g.muted);
-    setMuted(g.muted);
-  };
 
   const toLocal = (e: React.PointerEvent) => {
     const canvas = canvasRef.current!;
@@ -212,13 +168,13 @@ export function GameView() {
 
   const onDown = (e: React.PointerEvent) => {
     const g = gameRef.current;
-    if (!g || !ready) return;
+    if (!g) return;
     audio.unlockAudio();
+    if (g.voiceOn) void startVoice();
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     const p = toLocal(e);
     if (g.mode === "playing" || g.mode === "buff") onPointerDown(g, p.x, p.y);
-    setMuted(g.muted);
   };
   const onMove = (e: React.PointerEvent) => {
     const g = gameRef.current;
@@ -233,10 +189,19 @@ export function GameView() {
     onPointerUp(g, p.x, p.y);
   };
 
+  const toggleMute = () => {
+    const g = gameRef.current;
+    if (!g) return;
+    g.muted = !g.muted;
+    audio.setMuted(g.muted);
+    setMuted(g.muted);
+  };
+
   const start = () => {
     const g = gameRef.current;
     if (!g || !ready) return;
     audio.unlockAudio();
+    if (g.voiceOn) void startVoice();
     resetRun(g, false);
     setShopOpen(false);
     setSettingsOpen(false);
@@ -303,9 +268,22 @@ export function GameView() {
                 {(shopT3Open(g.shop) || g.debug) && (
                   <>
                     <div className="ribbon">三の強化</div>
-                    <p className="shop-hint">口寄せ・押し戻し・輪刃。</p>
+                    <p className="shop-hint">
+                      消費 {shopT3Spent(g.shop).toLocaleString("ja-JP")} / {SHOP_T4_SPEND.toLocaleString("ja-JP")} 両。全部 Lv.2 以上で四の強化。
+                    </p>
                     <div className="shop-list">
                       {SHOP_T3_ITEMS.map((item) => (
+                        <ShopRow key={item.id} g={g} id={item.id} name={item.name} desc={item.desc} onChange={() => setTick((n) => n + 1)} />
+                      ))}
+                    </div>
+                  </>
+                )}
+                {(shopT4Open(g.shop) || g.debug) && (
+                  <>
+                    <div className="ribbon">四の強化</div>
+                    <p className="shop-hint">足枷・薄皮・自動重ね。三の強化を深く買った先。</p>
+                    <div className="shop-list">
+                      {SHOP_T4_ITEMS.map((item) => (
                         <ShopRow key={item.id} g={g} id={item.id} name={item.name} desc={item.desc} onChange={() => setTick((n) => n + 1)} />
                       ))}
                     </div>
@@ -340,18 +318,10 @@ export function GameView() {
               <button type="button" className="cta stagger" onClick={start} disabled={!ready}>
                 {ready ? "挑戦する" : "読み込み中"}
               </button>
-              <button
-                type="button"
-                className="ghost-btn stagger"
-                onClick={() => setShopOpen(true)}
-              >
+              <button type="button" className="ghost-btn stagger" onClick={() => setShopOpen(true)}>
                 式神強化
               </button>
-              <button
-                type="button"
-                className="ghost-btn stagger"
-                onClick={() => setSettingsOpen(true)}
-              >
+              <button type="button" className="ghost-btn stagger" onClick={() => setSettingsOpen(true)}>
                 設定
               </button>
               {!ready && <p className="shimmer stagger">式神を呼び出しています</p>}
@@ -376,6 +346,12 @@ export function GameView() {
                         口寄せ {g.shop.seed} ／ 押し戻し {g.shop.back} ／ 輪刃 {g.shop.arms}
                       </>
                     ) : null}
+                    {shopT4Open(g.shop) ? (
+                      <>
+                        <br />
+                        足枷 {g.shop.slow} ／ 薄皮 {g.shop.thin} ／ 自動重ね {g.shop.auto ? "解禁" : "—"}
+                      </>
+                    ) : null}
                   </>
                 ) : (
                   <>
@@ -385,12 +361,8 @@ export function GameView() {
                 )}
               </p>
               <div className="title-links stagger">
-                <a href="/how" className="terms-link">
-                  遊び方
-                </a>
-                <a href="/terms" className="terms-link">
-                  配信規約
-                </a>
+                <a href="/how" className="terms-link">遊び方</a>
+                <a href="/terms" className="terms-link">配信規約</a>
               </div>
             </div>
           </div>
@@ -398,12 +370,7 @@ export function GameView() {
         {kind === "weapon" && g && (
           <div className="overlay-scrim">
             <div className="overlay-panel enter">
-              <button
-                type="button"
-                className="weapon-hex-wrap"
-                onClick={() => setHexOnly(false)}
-                aria-label="武器昇格"
-              >
+              <button type="button" className="weapon-hex-wrap" onClick={() => setHexOnly(false)} aria-label="武器昇格">
                 <div className="weapon-hex" aria-hidden>
                   <span className="weapon-slash" />
                   <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
@@ -449,7 +416,7 @@ export function GameView() {
                   <button
                     key={o.id + tick}
                     type="button"
-                    className={`choice-card stagger ${o.risk ? "risk" : "safe"}`}
+                    className={`choice-card ${o.risk ? "risk" : "safe"} stagger`}
                     onClick={() => {
                       chooseRoute(g, i);
                       setKind(g.mode === "fail" ? "fail" : "none");
@@ -480,9 +447,7 @@ export function GameView() {
                 WAVE {g.wave}　戦闘力 {g.combatPower}
               </p>
               <p className="overlay-copy stagger">花魁がゴールへ流れ着いた。円陣は破れた。</p>
-              {g.lastEarned > 0 && (
-                <p className="shop-gain stagger">獲得両 +{g.lastEarned}</p>
-              )}
+              {g.lastEarned > 0 && <p className="shop-gain stagger">獲得両 +{g.lastEarned}</p>}
               <button
                 type="button"
                 className="cta stagger"
@@ -517,11 +482,7 @@ export function GameView() {
               >
                 タイトルへ
               </button>
-              <button
-                type="button"
-                className="ghost-btn stagger"
-                onClick={() => setSettingsOpen(true)}
-              >
+              <button type="button" className="ghost-btn stagger" onClick={() => setSettingsOpen(true)}>
                 設定
               </button>
             </div>
@@ -552,11 +513,7 @@ export function GameView() {
               >
                 タイトルへ
               </button>
-              <button
-                type="button"
-                className="ghost-btn stagger"
-                onClick={() => setSettingsOpen(true)}
-              >
+              <button type="button" className="ghost-btn stagger" onClick={() => setSettingsOpen(true)}>
                 設定
               </button>
             </div>
@@ -587,6 +544,19 @@ export function GameView() {
         {showPlayHud && g && <DebugDock g={g} onChange={() => setTick((n) => n + 1)} />}
         <button
           type="button"
+          className="hud-icon settings"
+          aria-label="設定"
+          aria-pressed={settingsOpen}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setSettingsOpen((on) => !on);
+          }}
+        >
+          設定
+        </button>
+        <button
+          type="button"
           className={`hud-icon mute${muted ? " on" : ""}`}
           aria-label={muted ? "音声オン" : "消音"}
           onPointerDown={(e) => e.stopPropagation()}
@@ -602,9 +572,7 @@ export function GameView() {
           <SettingsPanel
             g={g}
             onClose={() => setSettingsOpen(false)}
-            onChange={() => {
-              setTick((n) => n + 1);
-            }}
+            onChange={() => setTick((n) => n + 1)}
           />
         )}
       </div>
@@ -624,7 +592,7 @@ function overlayOf(g: Game): OverlayKind {
 
 function AuthSlot({ isPending, signedIn }: { isPending: boolean; signedIn: boolean }) {
   if (isPending) {
-    return <div className="auth-slot auth-skel" aria-hidden />;
+    return <div className="auth-slot shimmer">照合しています</div>;
   }
   if (signedIn) {
     return (
@@ -634,9 +602,11 @@ function AuthSlot({ isPending, signedIn }: { isPending: boolean; signedIn: boole
     );
   }
   return (
-    <Link to="/login" className="auth-slot auth-login">
-      Googleで保存
-    </Link>
+    <div className="auth-slot">
+      <a href="/login" className="terms-link">
+        Googleで保存
+      </a>
+    </div>
   );
 }
 
@@ -650,6 +620,9 @@ const SHOP_DEBUG_FIELD: Record<ShopId, DebugField> = {
   seed: "shopSeed",
   back: "shopBack",
   arms: "shopArms",
+  slow: "shopSlow",
+  thin: "shopThin",
+  auto: "shopAuto",
 };
 
 function ShopRow({
@@ -665,11 +638,10 @@ function ShopRow({
   desc: string;
   onChange: () => void;
 }) {
-  const lv = g.shop[id] ?? 0;
-  const maxed = lv >= shopMax(id);
+  const lv = g.shop[id];
   const cost = shopCost(id, lv);
+  const maxed = lv >= shopMax(id);
   const can = !maxed && g.bank >= cost;
-  const field = SHOP_DEBUG_FIELD[id];
   return (
     <div className="shop-row stagger">
       <div className="shop-copy">
@@ -687,12 +659,12 @@ function ShopRow({
           if (buyShop(g, id)) onChange();
         }}
       >
-        {maxed ? "最大" : `${cost} 両`}
+        {maxed ? "最大" : `${cost.toLocaleString("ja-JP")} 両`}
       </button>
       {g.debug && (
         <div className="debug-step">
-          <button type="button" onClick={() => { debugNudge(g, field, -1); onChange(); }}>−</button>
-          <button type="button" onClick={() => { debugNudge(g, field, 1); onChange(); }}>＋</button>
+          <button type="button" onClick={() => { debugNudge(g, SHOP_DEBUG_FIELD[id], -1); onChange(); }}>−</button>
+          <button type="button" onClick={() => { debugNudge(g, SHOP_DEBUG_FIELD[id], 1); onChange(); }}>＋</button>
         </div>
       )}
     </div>

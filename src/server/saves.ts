@@ -26,7 +26,10 @@ export const loadCloudSave = createServerFn({ method: "GET" })
       shop_seed: number;
       shop_back: number;
       shop_arms: number;
-    }>`select high_wave, bank, shop_atk, shop_spd, shop_coin, shop_okiku, shop_path, shop_base, shop_seed, shop_back, shop_arms from player_saves where user_id = ${context.userId} limit 1`;
+      shop_slow: number;
+      shop_thin: number;
+      shop_auto: number;
+    }>`select high_wave, bank, shop_atk, shop_spd, shop_coin, shop_okiku, shop_path, shop_base, shop_seed, shop_back, shop_arms, shop_slow, shop_thin, shop_auto from player_saves where user_id = ${context.userId} limit 1`;
     const row = rows[0];
     if (!row) return null;
     return {
@@ -42,6 +45,9 @@ export const loadCloudSave = createServerFn({ method: "GET" })
         seed: row.shop_seed,
         back: row.shop_back,
         arms: row.shop_arms,
+        slow: row.shop_slow,
+        thin: row.shop_thin,
+        auto: row.shop_auto,
       }),
     } satisfies CloudMeta;
   });
@@ -53,8 +59,8 @@ export const putCloudSave = createServerFn({ method: "POST" })
     const shop = readShop(data.shop);
     const sql = await getSql();
     await sql`
-      insert into player_saves (user_id, high_wave, bank, shop_atk, shop_spd, shop_coin, shop_okiku, shop_path, shop_base, shop_seed, shop_back, shop_arms, updated_at)
-      values (${context.userId}, ${data.highWave}, ${data.bank}, ${shop.atk}, ${shop.spd}, ${shop.coin}, ${shop.okiku}, ${shop.path}, ${shop.base}, ${shop.seed}, ${shop.back}, ${shop.arms}, now())
+      insert into player_saves (user_id, high_wave, bank, shop_atk, shop_spd, shop_coin, shop_okiku, shop_path, shop_base, shop_seed, shop_back, shop_arms, shop_slow, shop_thin, shop_auto, updated_at)
+      values (${context.userId}, ${data.highWave}, ${data.bank}, ${shop.atk}, ${shop.spd}, ${shop.coin}, ${shop.okiku}, ${shop.path}, ${shop.base}, ${shop.seed}, ${shop.back}, ${shop.arms}, ${shop.slow}, ${shop.thin}, ${shop.auto}, now())
       on conflict (user_id) do update set
         high_wave = greatest(player_saves.high_wave, excluded.high_wave),
         bank = excluded.bank,
@@ -67,6 +73,9 @@ export const putCloudSave = createServerFn({ method: "POST" })
         shop_seed = greatest(player_saves.shop_seed, excluded.shop_seed),
         shop_back = greatest(player_saves.shop_back, excluded.shop_back),
         shop_arms = greatest(player_saves.shop_arms, excluded.shop_arms),
+        shop_slow = greatest(player_saves.shop_slow, excluded.shop_slow),
+        shop_thin = greatest(player_saves.shop_thin, excluded.shop_thin),
+        shop_auto = greatest(player_saves.shop_auto, excluded.shop_auto),
         updated_at = now()
     `;
     return true;

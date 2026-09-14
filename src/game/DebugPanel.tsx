@@ -1,6 +1,7 @@
 import type { Game } from "./types";
 import type { DebugField } from "./sim";
-import { debugNudge, debugOpenBuff, debugOpenRoute, debugOpenWeapon, debugUnlockAll, setDebugMode, setPlayStyle } from "./sim";
+import { debugNudge, debugOpenBuff, debugOpenRoute, debugOpenWeapon, debugUnlockAll, setAutoMerge, setDebugMode, setPlayStyle, setVoiceOn } from "./sim";
+import { startVoice, stopVoice, voiceStatus } from "./mic";
 
 const ROWS: Array<{ id: DebugField; label: string; fmt: (g: Game) => string }> = [
   { id: "bank", label: "所持両", fmt: (g) => String(g.bank) },
@@ -13,6 +14,9 @@ const ROWS: Array<{ id: DebugField; label: string; fmt: (g: Game) => string }> =
   { id: "shopSeed", label: "店・口寄せ", fmt: (g) => String(g.shop.seed) },
   { id: "shopBack", label: "店・押し戻し", fmt: (g) => String(g.shop.back) },
   { id: "shopArms", label: "店・輪刃", fmt: (g) => String(1 + g.shop.arms) },
+  { id: "shopSlow", label: "店・足枷", fmt: (g) => String(g.shop.slow) },
+  { id: "shopThin", label: "店・薄皮", fmt: (g) => String(g.shop.thin) },
+  { id: "shopAuto", label: "店・自動重ね", fmt: (g) => (g.shop.auto ? "解禁" : "未") },
   { id: "coins", label: "ランの両", fmt: (g) => String(g.coins) },
   { id: "wave", label: "WAVE", fmt: (g) => String(g.wave) },
   { id: "highWave", label: "最高WAVE", fmt: (g) => String(g.highWave) },
@@ -78,6 +82,68 @@ export function SettingsPanel({
               ? "ユニットを動かしている間、円陣は休止と同じく止まる。"
               : "動かしながら戦う。今までの仕様。"}
           </p>
+          <p className="shop-hint stagger">叫び</p>
+          <div className="play-style stagger">
+            <button
+              type="button"
+              className={`debug-switch${g.voiceOn ? " on" : ""}`}
+              onClick={() => {
+                setVoiceOn(g, true);
+                void startVoice();
+                onChange();
+              }}
+            >
+              ON
+            </button>
+            <button
+              type="button"
+              className={`debug-switch${!g.voiceOn ? " on" : ""}`}
+              onClick={() => {
+                setVoiceOn(g, false);
+                stopVoice();
+                onChange();
+              }}
+            >
+              OFF
+            </button>
+          </div>
+          <p className="shop-hint stagger">
+            {voiceStatus() === "denied"
+              ? "マイクが拒否されました。ブラウザの許可を出してください。"
+              : g.voiceOn
+                ? "叫んでいるあいだ、大きさで最大3倍、声が高いほどさらに最大10倍。合わせて最大30倍。"
+                : "マイクは使わない。"}
+          </p>
+          {g.shop.auto >= 1 && (
+            <>
+              <p className="shop-hint stagger">自動重ね</p>
+              <div className="play-style stagger">
+                <button
+                  type="button"
+                  className={`debug-switch${g.autoMerge ? " on" : ""}`}
+                  onClick={() => {
+                    setAutoMerge(g, true);
+                    onChange();
+                  }}
+                >
+                  ON
+                </button>
+                <button
+                  type="button"
+                  className={`debug-switch${!g.autoMerge ? " on" : ""}`}
+                  onClick={() => {
+                    setAutoMerge(g, false);
+                    onChange();
+                  }}
+                >
+                  OFF
+                </button>
+              </div>
+              <p className="shop-hint stagger">
+                {g.autoMerge ? "同じレベルが3体そろうと、重ねてレベルが上がる。" : "自分で重ねる。"}
+              </p>
+            </>
+          )}
         </div>
         <div className="shop-scroll">
           <p className="shop-hint stagger">開発中。誰でもデバッグを付けられます。</p>

@@ -25,21 +25,25 @@ import {
   SAVE_KEY,
   DEBUG_KEY,
   PLAY_KEY,
+  AUTO_KEY,
+  VOICE_KEY,
   START_COINS,
   shopCost,
   shopMax,
   shopT1Maxed,
   isShopT2,
   isShopT3,
+  isShopT4,
   shopT3Open,
+  shopT4Open,
   extraOkikuAt,
   weaponAt,
   routeProcessedAt,
   routeHpAt,
   wrapBackAt,
   armCount,
+  oiranPaceAt,
   runBankGain,
-  emptyShop,
   readShop,
   SLOT_COUNT,
   SLOT_HIT_R,
@@ -70,42 +74,47 @@ import {
 } from "./data";
 import type { Ball, Game, Hero, HeroId, Mode, PlayStyle, Projectile, Role, ShopId, ShopUpgrades, WeaponOption } from "./types";
 import * as audio from "./audio";
+import { pollVoice } from "./mic";
 
 function nid(g: Game): number {
   g.nextId += 1;
   return g.nextId;
 }
 
-type SaveBlob = {
-  version?: number;
-  highWave?: number;
-  bank?: number;
-  shop?: Partial<ShopUpgrades>;
+export type MetaSave = {
+  version: number;
+  highWave: number;
+  bank: number;
+  shop: ShopUpgrades;
 };
 
-export type MetaSave = { highWave: number; bank: number; shop: ShopUpgrades };
+function emptyMeta(): MetaSave {
+  return { version: 2, highWave: 0, bank: 0, shop: readShop() };
+}
 
 function loadMeta(): MetaSave {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return { highWave: 0, bank: 0, shop: emptyShop() };
-    const p = JSON.parse(raw) as SaveBlob;
+    if (!raw) return emptyMeta();
+    const p = JSON.parse(raw) as Partial<MetaSave> & { highWave?: number };
     return {
+      version: 2,
       highWave: p.highWave ?? 0,
-      bank: Math.max(0, Math.floor(p.bank ?? 0)),
+      bank: p.bank ?? 0,
       shop: readShop(p.shop),
     };
   } catch {
-    return { highWave: 0, bank: 0, shop: emptyShop() };
+    return emptyMeta();
   }
 }
 
 export function snapshotMeta(g: Game): MetaSave {
-  return { highWave: g.highWave, bank: g.bank, shop: { ...g.shop } };
+  return { version: 2, highWave: g.highWave, bank: g.bank, shop: { ...g.shop } };
 }
 
 export function mergeMeta(a: MetaSave, b: MetaSave): MetaSave {
   return {
+    version: 2,
     highWave: Math.max(a.highWave, b.highWave),
     bank: Math.max(a.bank, b.bank),
     shop: {
@@ -118,6 +127,9 @@ export function mergeMeta(a: MetaSave, b: MetaSave): MetaSave {
       seed: Math.max(a.shop.seed, b.shop.seed),
       back: Math.max(a.shop.back, b.shop.back),
       arms: Math.max(a.shop.arms, b.shop.arms),
+      slow: Math.max(a.shop.slow, b.shop.slow),
+      thin: Math.max(a.shop.thin, b.shop.thin),
+      auto: Math.max(a.shop.auto, b.shop.auto),
     },
   };
 }
@@ -137,15 +149,7 @@ export function setCloudFlush(fn: ((m: MetaSave) => void) | null) {
 function saveMeta(g: Game) {
   try {
     if (g.wave > g.highWave) g.highWave = g.wave;
-    localStorage.setItem(
-      SAVE_KEY,
-      JSON.stringify({
-        version: 2,
-        highWave: g.highWave,
-        bank: g.bank,
-        shop: g.shop,
-      }),
-    );
+    localStorage.setItem(SAVE_KEY, JSON.stringify(snapshotMeta(g)));
   } catch {
     /* private mode */
   }
@@ -186,17 +190,49 @@ export function setPlayStyle(g: Game, style: PlayStyle) {
   }
 }
 
+function loadAutoMerge(): boolean {
+  try {
+    const v = localStorage.getItem(AUTO_KEY);
+    if (v === "0") return false;
+    if (v === "1") return true;
+  } catch {
+    /* private mode */
+  }
+  return true;
+}
+
+export function setAutoMerge(g: Game, on: boolean) {
+  g.autoMerge = on;
+  try {
+    localStorage.setItem(AUTO_KEY, on ? "1" : "0");
+  } catch {
+    /* private mode */
+  }
+}
+
+function loadVoiceFlag(): boolean {
+  try {
+    return localStorage.getItem(VOICE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setVoiceOn(g: Game, on: boolean) {
+  g.voiceOn = on;
+  if (!on) g.screamMul = 1;
+  try {
+    localStorage.setItem(VOICE_KEY, on ? "1" : "0");
+  } catch {
+    /* private mode */
+  }
+}
+
 export type DebugField =
   | "bank"
   | "shopAtk"
   | "shopSpd"
   | "shopCoin"
-  | "shopOkiku"
-  | "shopPath"
-  | "shopBase"
-  | "shopSeed"
-  | "shopBack"
-  | "shopArms"
   | "coins"
   | "wave"
   | "processed"
@@ -206,6 +242,15 @@ export type DebugField =
   | "atkMul"
   | "spdMul"
   | "twin"
+  | "shopOkiku"
+  | "shopPath"
+  | "shopBase"
+  | "shopSeed"
+  | "shopBack"
+  | "shopArms"
+  | "shopSlow"
+  | "shopThin"
+  | "shopAuto"
   | "highWave";
 
 function clamp(n: number, lo: number, hi: number) {
@@ -224,6 +269,9 @@ export function debugNudge(g: Game, field: DebugField, dir: 1 | -1) {
   else if (field === "shopSeed") g.shop.seed = clamp(g.shop.seed + s, 0, shopMax("seed"));
   else if (field === "shopBack") g.shop.back = clamp(g.shop.back + s, 0, shopMax("back"));
   else if (field === "shopArms") g.shop.arms = clamp(g.shop.arms + s, 0, shopMax("arms"));
+  else if (field === "shopSlow") g.shop.slow = clamp(g.shop.slow + s, 0, shopMax("slow"));
+  else if (field === "shopThin") g.shop.thin = clamp(g.shop.thin + s, 0, shopMax("thin"));
+  else if (field === "shopAuto") g.shop.auto = clamp(g.shop.auto + s, 0, shopMax("auto"));
   else if (field === "coins") g.coins = Math.max(0, g.coins + s * 10);
   else if (field === "wave") g.wave = Math.max(1, g.wave + s);
   else if (field === "processed") g.processed = Math.max(0, g.processed + s);
@@ -273,12 +321,14 @@ export function applyShop(g: Game) {
 export function buyShop(g: Game, id: ShopId): boolean {
   if (isShopT2(id) && !shopT1Maxed(g.shop)) return false;
   if (isShopT3(id) && !shopT3Open(g.shop)) return false;
+  if (isShopT4(id) && !shopT4Open(g.shop)) return false;
   const lv = g.shop[id] ?? 0;
   if (lv >= shopMax(id)) return false;
   const cost = shopCost(id, lv);
   if (g.bank < cost) return false;
   g.bank -= cost;
   g.shop[id] = lv + 1;
+  if (id === "auto") setAutoMerge(g, true);
   saveMeta(g);
   audio.sfxSelect();
   return true;
@@ -319,7 +369,7 @@ function stampGoldNeta(g: Game, b: Ball) {
     return;
   }
   g.netaSinceGold += 1;
-  if (g.netaSinceGold >= GOLD_LATE_NORMAL) {
+  if (g.netaSinceGold > GOLD_LATE_NORMAL) {
     b.gold = true;
     g.netaSinceGold = 0;
   } else {
@@ -359,6 +409,7 @@ function emptySlots(): Array<Hero | null> {
 }
 
 function seedHero(g: Game, defId: HeroId, slot: number, buffMul = 1): Hero {
+  const swing = g.rng() * Math.PI * 2;
   return {
     id: nid(g),
     defId,
@@ -368,19 +419,26 @@ function seedHero(g: Game, defId: HeroId, slot: number, buffMul = 1): Hero {
     atkCd: 0.2,
     facing: 1,
     attackT: 0,
-    swing: g.rng() * Math.PI * 2,
+    swing,
+    prevSwing: swing,
+    cleaveIds: [],
     targetX: BOSS_X,
     targetY: BOSS_Y,
     buffMul,
+    rank: 0,
   };
 }
 
 function heroAtk(g: Game, h: Hero): number {
   const d = HEROES[h.defId];
-  return (d.atk + g.shop.base) * levelMul(h.level) * g.atkMul * h.buffMul;
+  return (d.atk + g.shop.base) * levelMul(h.level) * g.atkMul * h.buffMul * g.screamMul;
 }
 
-export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boolean; playStyle?: PlayStyle }): Game {
+function liveSpd(g: Game) {
+  return g.spdMul * g.screamMul;
+}
+
+export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boolean; playStyle?: PlayStyle; autoMerge?: boolean; voiceOn?: boolean }): Game {
   const rng = mulberry32((Math.random() * 0xffffffff) | 0);
   const meta = loadMeta();
   const g: Game = {
@@ -402,13 +460,17 @@ export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boo
     floats: [],
     selectedSlot: null,
     drag: null,
+    moveSeq: 0,
     shake: 0,
     hitstop: 0,
-    spawnQueue: makeWave(1, rng),
+    spawnQueue: makeWave(1, rng, 0, meta.shop.thin),
     dropCd: 0,
     muted: opts?.muted ?? false,
     debug: opts?.debug ?? loadDebugFlag(),
     playStyle: opts?.playStyle ?? loadPlayStyle(),
+    autoMerge: opts?.autoMerge ?? loadAutoMerge(),
+    voiceOn: opts?.voiceOn ?? loadVoiceFlag(),
+    screamMul: 1,
     unlocked: ["okiku"],
     atkMul: 1,
     spdMul: 1,
@@ -456,14 +518,18 @@ export function resetRun(g: Game, demo = false) {
   const muted = g.muted;
   const debug = g.debug;
   const playStyle = g.playStyle;
+  const autoMerge = g.autoMerge;
+  const voiceOn = g.voiceOn;
   const bank = g.bank;
   const shop = { ...g.shop };
   const lastEarned = g.lastEarned;
-  const fresh = createGame({ demo, muted, debug, playStyle });
+  const fresh = createGame({ demo, muted, debug, playStyle, autoMerge, voiceOn });
   Object.assign(g, fresh);
   g.highWave = high;
   g.debug = debug;
   g.playStyle = playStyle;
+  g.autoMerge = autoMerge;
+  g.voiceOn = voiceOn;
   g.bank = bank;
   g.shop = shop;
   g.lastEarned = demo ? lastEarned : 0;
@@ -475,7 +541,7 @@ export function resetRun(g: Game, demo = false) {
 function refillStack(g: Game, cap = STACK_CAP) {
   while (g.stack.length < cap && g.spawnQueue.length) {
     const spec = g.spawnQueue.shift()!;
-    const live = temariHpAt(g.summonCount, g.rng, g.wave);
+    const live = temariHpAt(g.summonCount, g.rng, g.wave, g.shop.thin);
     const hp = Math.max(spec.hp, live);
     g.stack.push(makeBall(g, { hp, pattern: spec.pattern }));
   }
@@ -509,7 +575,7 @@ function recomputePower(g: Game) {
     if (!h) continue;
     const d = HEROES[h.defId];
     const atk = heroAtk(g, h);
-    const iv = d.interval / g.spdMul;
+    const iv = d.interval / liveSpd(g);
     p += (atk / iv) * 10;
   }
   g.combatPower = Math.round(p);
@@ -624,10 +690,16 @@ function onGoldPlate(g: Game, b: Ball) {
   g.flashT = 1.2;
 }
 
+function applyBallDmg(g: Game, b: Ball, dmg: number) {
+  hurtBall(g, b, dmg);
+}
+
+function applyBossDmg(g: Game, dmg: number) {
+  hurtBoss(g, dmg);
+}
+
 type HitResult = { applied: number; hp: number; dead: boolean };
 
-// 量の計算と HP 減算はここだけ。攻撃側（振り・弾）は「何点与えるか／死んだか」だけ見る。
-// HP を各呼び出しから直接引くと、同じ対象へ同時ヒットしたときに上書きで消える。
 function rollStrike(g: Game, h: Hero): number {
   return Math.max(1, Math.round(heroAtk(g, h) * (0.88 + g.rng() * 0.24)));
 }
@@ -684,7 +756,7 @@ function onBossDown(g: Game) {
     track: Math.min(0.85, g.boss.track + 0.14),
     spin: g.boss.spin,
   };
-  g.spawnQueue.push(...makeWave(g.wave, g.rng, g.summonCount));
+  g.spawnQueue.push(...makeWave(g.wave, g.rng, g.summonCount, g.shop.thin));
   g.netaReserve += NETA_RESERVE;
   refillStack(g, g.processed >= 4 ? STACK_CAP : STACK_START);
   if (g.demo) return;
@@ -835,7 +907,7 @@ function pickTarget(g: Game, hx: number, hy: number, range: number, role: Role, 
 
 function meleeSweep(g: Game, h: Hero, pos: { x: number; y: number }) {
   // 体の周囲円・inPit 全当てを戻すな。当たるのは今の振りの先端だけ。
-  // 輪刃は先端が何本あっても、各先端の重なりだけ。
+  // 表示10までは重なったうち最近傍の1体。11以上は cleaveSweep。
   const amount = rollStrike(g, h);
   h.attackT = 1;
   const r = swingTipR(h);
@@ -843,7 +915,6 @@ function meleeSweep(g: Game, h: Hero, pos: { x: number; y: number }) {
   const first = swingTip(h, pos.x, pos.y, 0, n);
   h.targetX = first.x;
   h.targetY = first.y;
-  const multi = isMultiHit(h.level);
 
   type Hit = { kind: "ball"; b: Ball } | { kind: "boss" };
   let hitBoss = false;
@@ -856,25 +927,11 @@ function meleeSweep(g: Game, h: Hero, pos: { x: number; y: number }) {
       if (tipHits(tip, r, b.x, b.y, extra)) overlapped.push({ kind: "ball", b });
     };
     for (const b of g.falling) consider(b, BALL_R);
-    if (multi) {
-      for (const b of g.stack) consider(b, BALL_R);
-    } else if (g.stack.length) {
-      consider(g.stack[0]!, BALL_R);
-    }
+    if (g.stack.length) consider(g.stack[0]!, BALL_R);
     for (const b of g.wrap) consider(b, WRAP_ORB_R);
     if (tipHits(tip, r, g.boss.x, g.boss.y - 10, 26)) overlapped.push({ kind: "boss" });
 
-    const deliver = (hit: Hit) => {
-      if (hit.kind === "boss") {
-        if (hurtBoss(g, amount)) hitBoss = true;
-      } else if (hurtBall(g, hit.b, amount)) {
-        hitBall = true;
-      }
-    };
-
-    if (multi) {
-      for (const hit of overlapped) deliver(hit);
-    } else if (overlapped.length) {
+    if (overlapped.length) {
       let best = overlapped[0]!;
       let bestD = Infinity;
       for (const hit of overlapped) {
@@ -886,7 +943,11 @@ function meleeSweep(g: Game, h: Hero, pos: { x: number; y: number }) {
           best = hit;
         }
       }
-      deliver(best);
+      if (best.kind === "boss") {
+        if (hurtBoss(g, amount)) hitBoss = true;
+      } else if (hurtBall(g, best.b, amount)) {
+        hitBall = true;
+      }
     }
     slashFx(g, tip.x, tip.y);
   };
@@ -895,6 +956,76 @@ function meleeSweep(g: Game, h: Hero, pos: { x: number; y: number }) {
 
   pruneDead(g);
   if (!hitBoss && hitBall && !g.demo) audio.sfxHit();
+}
+
+function arcTouches(
+  h: Hero,
+  pos: { x: number; y: number },
+  arm: number,
+  arms: number,
+  x: number,
+  y: number,
+  extra: number,
+): boolean {
+  const r = swingTipR(h);
+  let d = h.swing - h.prevSwing;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  const steps = Math.max(2, Math.ceil(Math.abs(d) / 0.1));
+  for (let i = 0; i <= steps; i++) {
+    const a = h.prevSwing + (d * i) / steps;
+    const tip = swingTip({ ...h, swing: a }, pos.x, pos.y, arm, arms);
+    if (tipHits(tip, r, x, y, extra)) return true;
+  }
+  return false;
+}
+
+function cleaveSweep(g: Game, h: Hero, pos: { x: number; y: number }) {
+  // 表示11以上。弾は出さない。先端が通った寿司はすべて削る。1回の通過で1回。
+  const n = armCount(g.shop.arms);
+  let amount: number | null = null;
+  const now: number[] = [];
+  let struck = false;
+  const pass = (id: number, hit: () => boolean) => {
+    if (now.includes(id)) return;
+    now.push(id);
+    if (h.cleaveIds.includes(id)) return;
+    if (amount == null) amount = rollStrike(g, h);
+    if (hit()) struck = true;
+  };
+
+  for (let i = 0; i < n; i++) {
+    for (const b of g.wrap) {
+      if (b.hp <= 0) continue;
+      if (!arcTouches(h, pos, i, n, b.x, b.y, WRAP_ORB_R)) continue;
+      pass(b.id, () => !!hurtBall(g, b, amount!));
+    }
+    for (const b of g.falling) {
+      if (b.hp <= 0) continue;
+      if (!arcTouches(h, pos, i, n, b.x, b.y, BALL_R)) continue;
+      pass(b.id, () => !!hurtBall(g, b, amount!));
+    }
+    if (g.stack.length) {
+      const m = g.stack[0]!;
+      if (m.hp > 0 && arcTouches(h, pos, i, n, m.x, m.y, BALL_R)) {
+        pass(m.id, () => !!hurtBall(g, m, amount!));
+      }
+    }
+    if (arcTouches(h, pos, i, n, g.boss.x, g.boss.y - 10, 26)) {
+      pass(-1, () => !!hurtBoss(g, amount!));
+    }
+  }
+
+  const first = swingTip(h, pos.x, pos.y, 0, n);
+  h.targetX = first.x;
+  h.targetY = first.y;
+  if (struck) {
+    h.attackT = 1;
+    slashFx(g, first.x, first.y);
+    if (!g.demo) audio.sfxHit();
+  }
+  h.cleaveIds = now;
+  pruneDead(g);
 }
 
 function fireRanged(g: Game, h: Hero, target: Target) {
@@ -931,7 +1062,7 @@ function fireRanged(g: Game, h: Hero, target: Target) {
       ty,
       target: kind,
       targetId,
-      multi: isMultiHit(h.level),
+      multi: false,
     });
   }
 }
@@ -983,15 +1114,17 @@ function stepProjectiles(g: Game, dt: number) {
     const hitR = p.target === "boss" ? 36 : 18;
     if (Math.hypot(p.x - p.tx, p.y - p.ty) < hitR || p.life <= 0) {
       if (p.multi) {
-        const near = (x: number, y: number, r: number) => Math.hypot(p.x - x, p.y - y) <= r;
-        for (const b of g.falling) if (near(b.x, b.y, BALL_R + 10)) hurtBall(g, b, p.dmg);
-        for (const b of g.stack) if (near(b.x, b.y, BALL_R + 10)) hurtBall(g, b, p.dmg);
-        for (const b of g.wrap) if (near(b.x, b.y, WRAP_ORB_R + 10)) hurtBall(g, b, p.dmg);
-        if (near(g.boss.x, g.boss.y - 18, 36)) hurtBoss(g, p.dmg);
-      } else if (p.target === "boss") hurtBoss(g, p.dmg);
+        const rBall = 18;
+        const ballHit = (b: Ball, extra: number) =>
+          b.hp > 0 && dist2(p.x, p.y, b.x, b.y) <= (rBall + extra) * (rBall + extra);
+        for (const b of g.falling) if (ballHit(b, BALL_R)) applyBallDmg(g, b, p.dmg);
+        for (const b of g.stack) if (ballHit(b, BALL_R)) applyBallDmg(g, b, p.dmg);
+        for (const b of g.wrap) if (ballHit(b, WRAP_ORB_R)) applyBallDmg(g, b, p.dmg);
+        if (dist2(p.x, p.y, g.boss.x, g.boss.y - 18) <= 36 * 36) applyBossDmg(g, p.dmg);
+      } else if (p.target === "boss") applyBossDmg(g, p.dmg);
       else {
         const b = findBall(g, p.targetId);
-        if (b) hurtBall(g, b, p.dmg);
+        if (b && b.hp > 0) applyBallDmg(g, b, p.dmg);
       }
       burst(g, p.x, p.y, p.color, 5);
       g.projectiles.splice(i, 1);
@@ -1003,21 +1136,26 @@ function stepProjectiles(g: Game, dt: number) {
 function stepHeroes(g: Game, dt: number) {
   for (const h of g.slots) {
     if (!h) continue;
-    h.swing += (1.55 + h.attackT * 3.8) * g.spdMul * dt;
-    h.attackT = Math.max(0, h.attackT - dt * (1.7 + g.spdMul * 1.1));
+    h.prevSwing = h.swing;
+    h.swing += (1.55 + h.attackT * 3.8) * liveSpd(g) * dt;
+    h.attackT = Math.max(0, h.attackT - dt * (1.7 + liveSpd(g) * 1.1));
+    const pos = slotXY(h.slot);
+    if (isMultiHit(h.level)) {
+      cleaveSweep(g, h, pos);
+      continue;
+    }
     h.atkCd -= dt;
     if (h.atkCd > 0) continue;
     const def = HEROES[h.defId];
-    const pos = slotXY(h.slot);
     const range = heroRange(h);
     if (def.role === "melee") {
       if (!meleeTipTouching(g, h, pos)) continue;
-      h.atkCd = def.interval / g.spdMul;
+      h.atkCd = def.interval / liveSpd(g);
       meleeSweep(g, h, pos);
     } else {
       const t = pickTarget(g, pos.x, pos.y, range, def.role, h.buffMul);
       if (!t) continue;
-      h.atkCd = def.interval / g.spdMul;
+      h.atkCd = def.interval / liveSpd(g);
       fireRanged(g, h, t);
     }
   }
@@ -1069,31 +1207,25 @@ export function trySummon(g: Game, opts?: { free?: boolean }): boolean {
   }
   g.summonCount += 1;
   g.summonCost = summonCostAt(g.summonCount);
-  placeSummon(g, slot);
-  if (free) {
-    const p = slotXY(slot);
-    float(g, p.x, p.y - 26, "召喚", "#e8c15a");
-  }
-  // 札は「壊した1回」のまま。手毬の硬さは増やさず、空きがあればもう1体。
-  if (g.twinSummon) {
-    for (let n = 0; n < g.twinSummon; n++) {
+  const id = rollSummon(g);
+  g.slots[slot] = seedHero(g, id, slot);
+  const p = slotXY(slot);
+  burst(g, p.x, p.y, "#e8c15a", 10, "puff");
+  if (free) float(g, p.x, p.y - 26, "召喚", "#e8c15a");
+  if (free && g.twinSummon > 0) {
+    for (let i = 0; i < g.twinSummon; i++) {
       const extra = firstEmpty(g);
       if (extra < 0) break;
-      placeSummon(g, extra);
-      const p = slotXY(extra);
-      float(g, p.x, p.y - 26, "二重", "#c9e8ff");
+      const id2 = rollSummon(g);
+      g.slots[extra] = seedHero(g, id2, extra);
+      const p2 = slotXY(extra);
+      burst(g, p2.x, p2.y, "#c9e8ff", 8, "puff");
+      float(g, p2.x, p2.y - 26, "二重", "#c9e8ff");
     }
   }
   recomputePower(g);
   if (!g.demo) audio.sfxSummon();
   return true;
-}
-
-function placeSummon(g: Game, slot: number) {
-  const id = rollSummon(g);
-  g.slots[slot] = seedHero(g, id, slot);
-  const p = slotXY(slot);
-  burst(g, p.x, p.y, "#e8c15a", 10, "puff");
 }
 
 function tryMergeOrSwap(g: Game, from: number, to: number): boolean {
@@ -1133,6 +1265,50 @@ function tryMergeOrSwap(g: Game, from: number, to: number): boolean {
   g.slots[to] = a;
   g.slots[from] = b;
   return true;
+}
+
+function bumpRank(g: Game, h: Hero) {
+  g.moveSeq += 1;
+  h.rank = g.moveSeq;
+}
+
+function tryAutoMerge(g: Game) {
+  if (g.demo || !g.autoMerge || g.shop.auto < 1 || g.drag) return;
+  const groups = new Map<string, number[]>();
+  g.slots.forEach((h, i) => {
+    if (!h || h.level >= 8) return;
+    const k = `${h.defId}:${h.level}`;
+    const arr = groups.get(k) ?? [];
+    arr.push(i);
+    groups.set(k, arr);
+  });
+  for (const idxs of groups.values()) {
+    if (idxs.length < 3) continue;
+    const ranked = idxs
+      .map((i) => ({ i, h: g.slots[i]! }))
+      .filter((x) => x.h)
+      .sort((a, b) => a.h.rank - b.h.rank || b.h.id - a.h.id);
+    if (ranked.length < 3) continue;
+    const keep = ranked[ranked.length - 1]!;
+    // 下から2体を、いちばん上へ。置いた地点があればそこ。なければ古い召喚側に積む。
+    const eat = ranked.slice(0, 2);
+    const a = keep.h;
+    let total = a.stack;
+    for (const x of eat) {
+      total += x.h.stack;
+      g.slots[x.i] = null;
+    }
+    a.level += 1;
+    a.stack = Math.max(1, total - 2);
+    const p = slotXY(keep.i);
+    burst(g, p.x, p.y, "#fff4c0", 16, "puff");
+    g.justMerged = 0.35;
+    g.shake = Math.min(1, g.shake + 0.25);
+    float(g, p.x, p.y - 28, `${displayLevel(a.level)}`, "#e8c15a");
+    recomputePower(g);
+    if (!g.demo) audio.sfxMerge();
+    return;
+  }
 }
 
 export function slotAt(x: number, y: number): number {
@@ -1194,7 +1370,10 @@ export function onPointerUp(g: Game, x: number, y: number) {
   const from = g.drag.slot;
   g.drag = null;
   const to = slotAt(x, y);
-  if (to >= 0) tryMergeOrSwap(g, from, to);
+  if (to < 0) return;
+  if (from !== to) tryMergeOrSwap(g, from, to);
+  const placed = g.slots[to];
+  if (placed) bumpRank(g, placed);
 }
 
 function openWeapon(g: Game) {
@@ -1316,6 +1495,8 @@ function demoBrain(g: Game, dt: number) {
 }
 
 export function step(g: Game, dt: number) {
+  if (g.voiceOn) g.screamMul = pollVoice(dt);
+  else g.screamMul = 1;
   const held = g.playStyle === "manual" && !!g.drag && g.mode === "playing";
   const simming = (g.mode === "playing" && !held) || (g.mode === "title" && g.demo);
   g.t += dt;
@@ -1355,12 +1536,13 @@ export function step(g: Game, dt: number) {
   }
 
   const packed = g.wrap.length / BELT_SLOTS;
-  g.boss.track -= (0.018 + g.wave * 0.0032 + packed * 0.01) * dt;
+  g.boss.track -= (0.018 + g.wave * 0.0032 + packed * 0.01) * dt * oiranPaceAt(g.shop.slow);
   failIfGoal(g);
   refillBelt(g, dt);
   layoutBelt(g, false, dt);
 
   stepHeroes(g, dt);
+  tryAutoMerge(g);
   stepProjectiles(g, dt);
   pruneDead(g);
   stepFx(g, dt);
@@ -1368,7 +1550,7 @@ export function step(g: Game, dt: number) {
   maybeEvents(g);
 
   if (g.spawnQueue.length === 0 && g.stack.length === 0 && g.falling.length === 0 && g.boss.hp > 0) {
-    g.spawnQueue.push(...makeWave(g.wave, g.rng, g.summonCount));
+    g.spawnQueue.push(...makeWave(g.wave, g.rng, g.summonCount, g.shop.thin));
   }
 }
 
