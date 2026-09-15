@@ -138,7 +138,7 @@ export function GameView() {
           applyMeta(g, mergeMeta(snapshotMeta(g), { version: 2, ...remote }));
         }
         setCloudFlush((m) => {
-          void putCloudSave({ data: { highWave: m.highWave, bank: m.bank, shop: m.shop } }).catch(
+          void putCloudSave({ data: { highWave: m.highWave, bank: m.bank, markBank: m.markBank, shop: m.shop } }).catch(
             () => {},
           );
         });
@@ -233,8 +233,10 @@ export function GameView() {
               <div className="shop-head">
                 <div className="ribbon stagger">基礎強化</div>
                 {g.lastEarned > 0 && <p className="shop-gain stagger">今回獲得 +{g.lastEarned} 両</p>}
+                {g.lastMarks > 0 && <p className="shop-gain stagger">今回華 +{g.lastMarks}</p>}
                 <p className="shop-bank stagger">
                   所持両 <strong>{g.bank}</strong>
+                  {g.markBank > 0 ? <>　華 <strong>{g.markBank}</strong></> : null}
                   {g.debug && (
                     <span className="debug-step inline">
                       <button type="button" onClick={() => { debugNudge(g, "bank", -1); setTick((n) => n + 1); }}>−</button>
@@ -330,6 +332,7 @@ export function GameView() {
               </p>
               <p className="shop-bank stagger">
                 所持両 <strong>{g?.bank ?? 0}</strong>
+                {g && g.markBank > 0 ? <>　華 <strong>{g.markBank}</strong></> : null}
                 {g && (g.shop.atk > 0 || g.shop.spd > 0 || g.shop.coin > 0) ? (
                   <>
                     <br />
@@ -448,6 +451,7 @@ export function GameView() {
               </p>
               <p className="overlay-copy stagger">花魁がゴールへ流れ着いた。円陣は破れた。</p>
               {g.lastEarned > 0 && <p className="shop-gain stagger">獲得両 +{g.lastEarned}</p>}
+              {g.lastMarks > 0 && <p className="shop-gain stagger">獲得華 +{g.lastMarks}</p>}
               <button
                 type="button"
                 className="cta stagger"

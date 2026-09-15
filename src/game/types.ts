@@ -1,7 +1,7 @@
 export type HeroId = "okiku" | "mio" | "kuro" | "hakumen" | "takaten";
 export type Rarity = "common" | "rare" | "elite";
 export type Role = "melee" | "ranged";
-export type BallKind = "stack" | "fall" | "wrap";
+export type BallKind = "stack" | "fall" | "wrap" | "collab";
 export type PlayStyle = "active" | "manual";
 export type Mode = "title" | "playing" | "paused" | "weapon" | "route" | "buff" | "fail";
 
@@ -31,6 +31,7 @@ export interface Ball {
   wrapIndex: number;
   bob: number;
   gold: boolean;
+  laneT: number;
 }
 
 export interface Hero {
@@ -153,6 +154,7 @@ export interface Game {
   stack: Ball[];
   falling: Ball[];
   wrap: Ball[];
+  collab: Ball[];
   boss: {
     hp: number;
     maxHp: number;
@@ -203,4 +205,8 @@ export interface Game {
   netaSinceGold: number;
   netaCd: number;
   netaReserve: number;
+  collabCd: number;
+  marks: number;
+  markBank: number;
+  lastMarks: number;
 }

@@ -17,7 +17,12 @@ import {
   VW,
   WRAP_ORB_R,
   WRAP_R,
+  COLLAB_MID,
+  COLLAB_ORB_R,
+  COLLAB_R,
+  COLLAB_SPAN,
   beltPose,
+  collabPose,
   buffCardRect,
   displayLevel,
   isMultiHit,
@@ -314,6 +319,10 @@ function drawBall(ctx: CanvasRenderingContext2D, b: Ball, r: number) {
     drawSushi(ctx, b, r);
     return;
   }
+  if (b.kind === "collab") {
+    drawCollabPlate(ctx, b, r);
+    return;
+  }
   const tex = temariTex[b.pattern % 5];
   ctx.save();
   ctx.translate(b.x, b.y + Math.sin(b.bob) * 0.6);
@@ -415,6 +424,74 @@ function drawBelt(ctx: CanvasRenderingContext2D) {
   ctx.textBaseline = "middle";
   ctx.fillText("ゴール", 0, -18);
   ctx.restore();
+}
+
+function drawCollabBelt(ctx: CanvasRenderingContext2D) {
+  const a0 = COLLAB_MID + COLLAB_SPAN / 2;
+  const a1 = COLLAB_MID - COLLAB_SPAN / 2;
+  ctx.save();
+  ctx.strokeStyle = "#4a3658";
+  ctx.lineWidth = 16;
+  ctx.lineCap = "butt";
+  ctx.beginPath();
+  ctx.arc(PIT_X, PIT_Y, COLLAB_R, a0, a1, true);
+  ctx.stroke();
+  ctx.strokeStyle = "#8a6aaa";
+  ctx.lineWidth = 9;
+  ctx.stroke();
+  ctx.strokeStyle = "#2a1a38";
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  ctx.arc(PIT_X, PIT_Y, COLLAB_R - 7, a0, a1, true);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(PIT_X, PIT_Y, COLLAB_R + 7, a0, a1, true);
+  ctx.stroke();
+  ctx.restore();
+
+  const end = collabPose(1);
+  ctx.save();
+  ctx.translate(end.x, end.y);
+  ctx.rotate(end.a + Math.PI / 2);
+  ctx.fillStyle = "#3a2450";
+  ctx.fillRect(-18, -18, 36, 16);
+  ctx.strokeStyle = "#c8a0e8";
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(-18, -18, 36, 16);
+  ctx.fillStyle = "#e8d4f8";
+  ctx.font = "bold 9px 'Hiragino Mincho ProN', 'Yu Mincho', serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("侵食", 0, -10);
+  ctx.restore();
+}
+
+function drawCollabPlate(ctx: CanvasRenderingContext2D, b: Ball, r: number) {
+  const a = Math.atan2(b.y - PIT_Y, b.x - PIT_X);
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.rotate(a + Math.PI / 2);
+  ctx.shadowColor = "rgba(160,110,210,0.55)";
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 2;
+  ctx.fillStyle = "#3a2458";
+  ctx.beginPath();
+  ctx.ellipse(0, 2, r + 3, r * 0.72, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#c8a0e8";
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+  ctx.shadowColor = "transparent";
+  ctx.fillStyle = "#5a3a78";
+  ctx.beginPath();
+  ctx.ellipse(0, 0, r * 0.78, r * 0.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#d4b0f0";
+  ctx.beginPath();
+  ctx.ellipse(0, -1.2, r * 0.82, r * 0.38, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  outlined(ctx, String(Math.max(0, Math.ceil(b.hp))), b.x, b.y - 1, "#f0e0ff", 11);
 }
 
 function drawPlus(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, t = 0) {
@@ -722,6 +799,7 @@ function drawHitboxes(ctx: CanvasRenderingContext2D, g: Game) {
   for (const b of g.stack) ring(b.x, b.y, BALL_R, "rgba(255,80,200,0.95)");
   for (const b of g.falling) ring(b.x, b.y, BALL_R, "rgba(255,80,200,0.95)");
   for (const b of g.wrap) ring(b.x, b.y, WRAP_ORB_R, "rgba(255,180,40,0.95)");
+  for (const b of g.collab) ring(b.x, b.y, COLLAB_ORB_R, "rgba(180,120,255,0.95)");
   ring(g.boss.x, g.boss.y - 10, 26, "rgba(255,60,70,0.95)");
 
   for (let i = 0; i < SLOT_COUNT; i++) {
@@ -787,10 +865,12 @@ function drawBuffMenu(ctx: CanvasRenderingContext2D, g: Game) {
 
 function drawHud(ctx: CanvasRenderingContext2D, g: Game) {
   ctx.save();
+  const showMark = g.marks > 0 || g.markBank > 0;
+  const topH = showMark ? 52 : 44;
   ctx.fillStyle = "rgba(18,14,10,0.58)";
-  ctx.fillRect(0, 0, VW, 44);
+  ctx.fillRect(0, 0, VW, topH);
   ctx.fillStyle = "rgba(232,193,90,0.28)";
-  ctx.fillRect(0, 44, VW, 1);
+  ctx.fillRect(0, topH, VW, 1);
 
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
@@ -816,6 +896,13 @@ function drawHud(ctx: CanvasRenderingContext2D, g: Game) {
   ctx.font = '700 14px "Zen Kaku Gothic New", sans-serif';
   ctx.fillStyle = "#e8c15a";
   ctx.fillText(coinStr, VW - 14, 23);
+
+  if (g.marks > 0 || g.markBank > 0) {
+    ctx.textAlign = "left";
+    ctx.font = '700 11px "Zen Kaku Gothic New", sans-serif';
+    ctx.fillStyle = "#d4b4f0";
+    ctx.fillText(`華 ${g.marks}`, 14, 38);
+  }
 
   if (g.voiceOn) {
     const t = Math.max(0, Math.min(1, (g.screamMul - 1) / 29));
@@ -898,6 +985,7 @@ export function draw(ctx: CanvasRenderingContext2D, g: Game) {
   else paintPit(ctx);
 
   drawBelt(ctx);
+  drawCollabBelt(ctx);
 
   for (let i = 0; i < SLOT_COUNT; i++) {
     if (g.slots[i] && !(g.drag && g.drag.slot === i)) continue;
@@ -908,6 +996,9 @@ export function draw(ctx: CanvasRenderingContext2D, g: Game) {
 
   for (let i = g.wrap.length - 1; i >= 0; i--) {
     drawBall(ctx, g.wrap[i]!, WRAP_ORB_R);
+  }
+  for (let i = g.collab.length - 1; i >= 0; i--) {
+    drawBall(ctx, g.collab[i]!, COLLAB_ORB_R);
   }
 
   for (let i = g.stack.length - 1; i >= 0; i--) {

@@ -77,6 +77,26 @@ export function beltPose(t: number): { x: number; y: number; a: number } {
   };
 }
 
+/** 11時ゴールの反対（5時）。本編レーンより内側の短い弧。ゴールには繋がらない。 */
+export const COLLAB_R = 148;
+export const COLLAB_MID = Math.PI / 3;
+export const COLLAB_SPAN = 0.98;
+export const COLLAB_FILL = 4;
+export const COLLAB_CAP = 6;
+export const COLLAB_CD = 1.7;
+export const COLLAB_SPEED = 0.075;
+export const COLLAB_ORB_R = 12;
+
+export function collabPose(t: number): { x: number; y: number; a: number } {
+  const tt = Math.max(0, Math.min(1, t));
+  const a = COLLAB_MID + COLLAB_SPAN / 2 - tt * COLLAB_SPAN;
+  return {
+    x: PIT_X + Math.cos(a) * COLLAB_R,
+    y: PIT_Y + Math.sin(a) * COLLAB_R,
+    a,
+  };
+}
+
 export const HEROES: Record<HeroId, HeroDef> = {
   okiku: {
     id: "okiku",

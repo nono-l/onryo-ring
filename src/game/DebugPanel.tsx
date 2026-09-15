@@ -17,6 +17,8 @@ const ROWS: Array<{ id: DebugField; label: string; fmt: (g: Game) => string }> =
   { id: "shopSlow", label: "店・足枷", fmt: (g) => String(g.shop.slow) },
   { id: "shopThin", label: "店・薄皮", fmt: (g) => String(g.shop.thin) },
   { id: "shopAuto", label: "店・自動重ね", fmt: (g) => (g.shop.auto ? "解禁" : "未") },
+  { id: "marks", label: "ランの華", fmt: (g) => String(g.marks) },
+  { id: "markBank", label: "所持華", fmt: (g) => String(g.markBank) },
   { id: "coins", label: "ランの両", fmt: (g) => String(g.coins) },
   { id: "wave", label: "WAVE", fmt: (g) => String(g.wave) },
   { id: "highWave", label: "最高WAVE", fmt: (g) => String(g.highWave) },

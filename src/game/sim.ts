@@ -56,6 +56,12 @@ import {
   WRAP_CAP,
   WRAP_ORB_R,
   beltPose,
+  collabPose,
+  COLLAB_CAP,
+  COLLAB_CD,
+  COLLAB_FILL,
+  COLLAB_ORB_R,
+  COLLAB_SPEED,
   bossHp,
   buffCardRect,
   displayLevel,
@@ -85,11 +91,12 @@ export type MetaSave = {
   version: number;
   highWave: number;
   bank: number;
+  markBank: number;
   shop: ShopUpgrades;
 };
 
 function emptyMeta(): MetaSave {
-  return { version: 2, highWave: 0, bank: 0, shop: readShop() };
+  return { version: 2, highWave: 0, bank: 0, markBank: 0, shop: readShop() };
 }
 
 function loadMeta(): MetaSave {
@@ -101,6 +108,7 @@ function loadMeta(): MetaSave {
       version: 2,
       highWave: p.highWave ?? 0,
       bank: p.bank ?? 0,
+      markBank: p.markBank ?? 0,
       shop: readShop(p.shop),
     };
   } catch {
@@ -109,7 +117,7 @@ function loadMeta(): MetaSave {
 }
 
 export function snapshotMeta(g: Game): MetaSave {
-  return { version: 2, highWave: g.highWave, bank: g.bank, shop: { ...g.shop } };
+  return { version: 2, highWave: g.highWave, bank: g.bank, markBank: g.markBank, shop: { ...g.shop } };
 }
 
 export function mergeMeta(a: MetaSave, b: MetaSave): MetaSave {
@@ -117,6 +125,7 @@ export function mergeMeta(a: MetaSave, b: MetaSave): MetaSave {
     version: 2,
     highWave: Math.max(a.highWave, b.highWave),
     bank: Math.max(a.bank, b.bank),
+    markBank: Math.max(a.markBank, b.markBank),
     shop: {
       atk: Math.max(a.shop.atk, b.shop.atk),
       spd: Math.max(a.shop.spd, b.shop.spd),
@@ -137,6 +146,7 @@ export function mergeMeta(a: MetaSave, b: MetaSave): MetaSave {
 export function applyMeta(g: Game, meta: MetaSave) {
   g.highWave = meta.highWave;
   g.bank = meta.bank;
+  g.markBank = meta.markBank;
   g.shop = readShop(meta.shop);
   if (g.demo || g.mode === "title") applyShop(g);
 }
@@ -251,6 +261,8 @@ export type DebugField =
   | "shopSlow"
   | "shopThin"
   | "shopAuto"
+  | "marks"
+  | "markBank"
   | "highWave";
 
 function clamp(n: number, lo: number, hi: number) {
@@ -284,10 +296,12 @@ export function debugNudge(g: Game, field: DebugField, dir: 1 | -1) {
   else if (field === "spdMul") g.spdMul = Math.max(0.1, Math.round((g.spdMul + s * 0.1) * 10) / 10);
   else if (field === "twin") g.twinSummon = Math.max(0, g.twinSummon + s);
   else if (field === "highWave") g.highWave = Math.max(0, g.highWave + s);
+  else if (field === "marks") g.marks = Math.max(0, g.marks + s);
+  else if (field === "markBank") g.markBank = Math.max(0, g.markBank + s * 5);
   if (field === "shopAtk" || field === "shopSpd" || field === "shopCoin" || field === "shopSeed") {
     if (g.demo || g.mode === "title") applyShop(g);
   }
-  if (field === "bank" || field.startsWith("shop") || field === "highWave") saveMeta(g);
+  if (field === "bank" || field.startsWith("shop") || field === "highWave" || field === "markBank") saveMeta(g);
   recomputePower(g);
 }
 
@@ -339,6 +353,10 @@ function awardBank(g: Game) {
   const gain = runBankGain(g.coins, g.wave);
   g.lastEarned = gain;
   g.bank += gain;
+  if (g.marks > 0) {
+    g.lastMarks = g.marks;
+    g.markBank += g.marks;
+  }
   saveMeta(g);
 }
 
@@ -356,6 +374,7 @@ function makeBall(g: Game, spec: { hp: number; pattern: number }, kind: Ball["ki
     wrapIndex: 0,
     bob: g.rng() * Math.PI * 2,
     gold: false,
+    laneT: 0,
   };
   if (kind === "wrap") stampGoldNeta(g, b);
   return b;
@@ -454,6 +473,7 @@ export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boo
     stack: [],
     falling: [],
     wrap: [],
+    collab: [],
     boss: { hp: bossHp(1), maxHp: bossHp(1), hitFlash: 0, x: BOSS_X, y: BOSS_Y, track: BELT_START, spin: 0 },
     projectiles: [],
     particles: [],
@@ -480,6 +500,9 @@ export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boo
     nextId: 1,
     highWave: meta.highWave,
     bank: meta.bank,
+    markBank: meta.markBank,
+    marks: 0,
+    lastMarks: 0,
     shop: meta.shop,
     lastEarned: 0,
     weaponOptions: [],
@@ -496,6 +519,7 @@ export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boo
     netaSinceGold: 0,
     netaCd: 0,
     netaReserve: NETA_RESERVE,
+    collabCd: 0,
   };
   g.slots[STARTER_SLOT] = seedHero(g, "okiku", STARTER_SLOT);
   const extra = extraOkikuAt(g.shop.okiku);
@@ -506,6 +530,8 @@ export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boo
   }
   for (let i = 0; i < BELT_FILL; i++) spawnBeltNeta(g);
   layoutBelt(g, true);
+  for (let i = 0; i < COLLAB_FILL; i++) spawnCollab(g, i * 0.18);
+  layoutCollab(g, true);
   refillStack(g, STACK_START);
   layoutStack(g, true);
   applyShop(g);
@@ -521,8 +547,10 @@ export function resetRun(g: Game, demo = false) {
   const autoMerge = g.autoMerge;
   const voiceOn = g.voiceOn;
   const bank = g.bank;
+  const markBank = g.markBank;
   const shop = { ...g.shop };
   const lastEarned = g.lastEarned;
+  const lastMarks = g.lastMarks;
   const fresh = createGame({ demo, muted, debug, playStyle, autoMerge, voiceOn });
   Object.assign(g, fresh);
   g.highWave = high;
@@ -531,8 +559,10 @@ export function resetRun(g: Game, demo = false) {
   g.autoMerge = autoMerge;
   g.voiceOn = voiceOn;
   g.bank = bank;
+  g.markBank = markBank;
   g.shop = shop;
   g.lastEarned = demo ? lastEarned : 0;
+  g.lastMarks = demo ? lastMarks : 0;
   applyShop(g);
   g.mode = demo ? "title" : "playing";
   g.demo = demo;
@@ -626,12 +656,18 @@ function float(g: Game, x: number, y: number, text: string, color = "#fff4e0", s
 }
 
 function noteProcessed(g: Game, kind: Ball["kind"]) {
-  if (kind === "wrap") return;
+  if (kind === "wrap" || kind === "collab") return;
   g.processed += 1;
 }
 
 function popBall(g: Game, b: Ball) {
-  burst(g, b.x, b.y, "#f0d9a0", 12, "puff");
+  burst(g, b.x, b.y, b.kind === "collab" ? "#c8a0e8" : "#f0d9a0", 12, "puff");
+  if (b.kind === "collab") {
+    g.marks += 1;
+    float(g, b.x, b.y - 8, "+華", "#d4b4f0");
+    if (!g.demo) audio.sfxPop();
+    return;
+  }
   const gold = Math.max(1, Math.round((1 + b.maxHp * 0.18) * g.goldMul));
   g.coins += gold;
   float(g, b.x, b.y - 8, `+${gold}`, "#e8c15a");
@@ -818,6 +854,42 @@ function reindexWrap(g: Game) {
   }
 }
 
+function spawnCollab(g: Game, t = 0): boolean {
+  if (g.collab.length >= COLLAB_CAP) return false;
+  if (g.collab.some((b) => Math.abs(b.laneT - t) < 0.14)) return false;
+  const b = makeBall(g, { hp: 1, pattern: (g.marks + g.collab.length) % 5 }, "collab");
+  b.laneT = t;
+  const p = collabPose(t);
+  b.x = p.x;
+  b.y = p.y;
+  g.collab.push(b);
+  return true;
+}
+
+function refillCollab(g: Game, dt: number) {
+  g.collabCd -= dt;
+  if (g.collab.length < COLLAB_FILL && g.collabCd <= 0) {
+    if (spawnCollab(g, 0)) g.collabCd = COLLAB_CD;
+  }
+}
+
+function layoutCollab(g: Game, snap = false, dt = 1 / 60) {
+  for (let i = g.collab.length - 1; i >= 0; i--) {
+    const b = g.collab[i]!;
+    if (b.hp <= 0) continue;
+    b.laneT += COLLAB_SPEED * dt;
+    if (b.laneT >= 1) {
+      g.collab.splice(i, 1);
+      continue;
+    }
+    const p = collabPose(b.laneT);
+    const k = snap ? 1 : Math.min(1, 10 * dt);
+    b.x += (p.x - b.x) * k;
+    b.y += (p.y - b.y) * k;
+    b.bob += dt * 5;
+  }
+}
+
 type Target = { kind: "ball"; ball: Ball } | { kind: "boss" };
 
 function dist2(ax: number, ay: number, bx: number, by: number) {
@@ -873,6 +945,9 @@ function meleeTipTouching(g: Game, h: Hero, pos: { x: number; y: number }): bool
     for (const b of g.wrap) {
       if (b.hp > 0 && tipHits(tip, r, b.x, b.y, WRAP_ORB_R)) return true;
     }
+    for (const b of g.collab) {
+      if (b.hp > 0 && tipHits(tip, r, b.x, b.y, COLLAB_ORB_R)) return true;
+    }
     if (tipHits(tip, r, g.boss.x, g.boss.y - 10, 26)) return true;
   }
   return false;
@@ -895,6 +970,8 @@ function pickTarget(g: Game, hx: number, hy: number, range: number, role: Role, 
     if (buffMul >= 4 && bossIn) return { kind: "boss" };
     const wrap = nearestBall(hx, hy, (range + WRAP_ORB_R) * (range + WRAP_ORB_R), g.wrap);
     if (wrap) return { kind: "ball", ball: wrap };
+    const collab = nearestBall(hx, hy, (range + COLLAB_ORB_R) * (range + COLLAB_ORB_R), g.collab);
+    if (collab) return { kind: "ball", ball: collab };
     if (bossIn) return { kind: "boss" };
     return null;
   }
@@ -902,6 +979,8 @@ function pickTarget(g: Game, hx: number, hy: number, range: number, role: Role, 
   if (bossIn) return { kind: "boss" };
   const wrap = nearestBall(hx, hy, (range + WRAP_ORB_R) * (range + WRAP_ORB_R), g.wrap);
   if (wrap) return { kind: "ball", ball: wrap };
+  const collab = nearestBall(hx, hy, (range + COLLAB_ORB_R) * (range + COLLAB_ORB_R), g.collab);
+  if (collab) return { kind: "ball", ball: collab };
   return null;
 }
 
@@ -929,6 +1008,7 @@ function meleeSweep(g: Game, h: Hero, pos: { x: number; y: number }) {
     for (const b of g.falling) consider(b, BALL_R);
     if (g.stack.length) consider(g.stack[0]!, BALL_R);
     for (const b of g.wrap) consider(b, WRAP_ORB_R);
+    for (const b of g.collab) consider(b, COLLAB_ORB_R);
     if (tipHits(tip, r, g.boss.x, g.boss.y - 10, 26)) overlapped.push({ kind: "boss" });
 
     if (overlapped.length) {
@@ -998,6 +1078,11 @@ function cleaveSweep(g: Game, h: Hero, pos: { x: number; y: number }) {
     for (const b of g.wrap) {
       if (b.hp <= 0) continue;
       if (!arcTouches(h, pos, i, n, b.x, b.y, WRAP_ORB_R)) continue;
+      pass(b.id, () => !!hurtBall(g, b, amount!));
+    }
+    for (const b of g.collab) {
+      if (b.hp <= 0) continue;
+      if (!arcTouches(h, pos, i, n, b.x, b.y, COLLAB_ORB_R)) continue;
       pass(b.id, () => !!hurtBall(g, b, amount!));
     }
     for (const b of g.falling) {
@@ -1070,6 +1155,7 @@ function fireRanged(g: Game, h: Hero, target: Target) {
 function findBall(g: Game, id: number): Ball | null {
   for (const b of g.falling) if (b.id === id) return b;
   for (const b of g.wrap) if (b.id === id) return b;
+  for (const b of g.collab) if (b.id === id) return b;
   for (const b of g.stack) if (b.id === id) return b;
   return null;
 }
@@ -1085,6 +1171,7 @@ function pruneDead(g: Game) {
   const wlen = g.wrap.length;
   g.wrap = g.wrap.filter(keep);
   if (g.wrap.length !== wlen) reindexWrap(g);
+  g.collab = g.collab.filter(keep);
 }
 
 function stepProjectiles(g: Game, dt: number) {
@@ -1120,6 +1207,7 @@ function stepProjectiles(g: Game, dt: number) {
         for (const b of g.falling) if (ballHit(b, BALL_R)) applyBallDmg(g, b, p.dmg);
         for (const b of g.stack) if (ballHit(b, BALL_R)) applyBallDmg(g, b, p.dmg);
         for (const b of g.wrap) if (ballHit(b, WRAP_ORB_R)) applyBallDmg(g, b, p.dmg);
+        for (const b of g.collab) if (ballHit(b, COLLAB_ORB_R)) applyBallDmg(g, b, p.dmg);
         if (dist2(p.x, p.y, g.boss.x, g.boss.y - 18) <= 36 * 36) applyBossDmg(g, p.dmg);
       } else if (p.target === "boss") applyBossDmg(g, p.dmg);
       else {
@@ -1540,6 +1628,8 @@ export function step(g: Game, dt: number) {
   failIfGoal(g);
   refillBelt(g, dt);
   layoutBelt(g, false, dt);
+  refillCollab(g, dt);
+  layoutCollab(g, false, dt);
 
   stepHeroes(g, dt);
   tryAutoMerge(g);

@@ -14,7 +14,7 @@ function HowPage() {
       <h1 className="display-title">遊び方</h1>
       <p className="terms-en">How to hold the ring</p>
       <p className="overlay-copy">
-        手前の手毬を壊すと式神が降りる。花魁が11時のゴールへ着いたら円陣は破れる。
+        手前の手毬を壊すと式神が降りる。花魁が11時のゴールへ着いたら円陣は破れる。5時側の短い紫レーンは侵食（試作）。倒すと華が貯まるが、ゴールには繋がらない。
       </p>
 
       <section>
