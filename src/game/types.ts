@@ -1,4 +1,5 @@
-export type HeroId = "okiku" | "mio" | "kuro" | "hakumen" | "takaten";
+export type HeroId = "okiku" | "mio" | "kuro" | "hakumen" | "takaten" | "shion";
+export type GuestStock = Partial<Record<HeroId, number>>;
 export type Rarity = "common" | "rare" | "elite";
 export type Role = "melee" | "ranged";
 export type BallKind = "stack" | "fall" | "wrap" | "collab";
@@ -209,4 +210,7 @@ export interface Game {
   marks: number;
   markBank: number;
   lastMarks: number;
+  guestStock: GuestStock;
+  guestLeft: GuestStock;
+  guestPick: HeroId | null;
 }

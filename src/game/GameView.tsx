@@ -2,17 +2,19 @@ import { useEffect, useRef, useState } from "react";
 import { UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { loadCloudSave, putCloudSave } from "@/server/saves";
-import { SHOP_ITEMS, SHOP_T2_ITEMS, SHOP_T3_ITEMS, SHOP_T4_ITEMS, SHOP_T3_SPEND, SHOP_T4_SPEND, VH, VW, shopCost, shopMax, shopT1Maxed, shopT2Spent, shopT3Open, shopT3Spent, shopT4Open, shopValue } from "./data";
-import { DebugDock, SettingsPanel } from "./DebugPanel";
+import { GUEST_HINT, GUEST_KINDS, HEROES, guestCost, guestLine, SHOP_ITEMS, SHOP_T2_ITEMS, SHOP_T3_ITEMS, SHOP_T4_ITEMS, SHOP_T3_SPEND, SHOP_T4_SPEND, VH, VW, shopCost, shopMax, shopT1Maxed, shopT2Spent, shopT3Open, shopT3Spent, shopT4Open, shopValue } from "./data";
+import { CodexPanel, DebugDock, HeroCard, SettingsPanel } from "./DebugPanel";
 import { draw, loadAssets } from "./draw";
 import {
   applyMeta,
+  buyGuest,
   buyShop,
   chooseRoute,
   chooseWeapon,
   createGame,
   debugNudge,
   mergeMeta,
+  nudgeGuest,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -22,8 +24,7 @@ import {
   snapshotMeta,
   step,
 } from "./sim";
-import type { Game } from "./types";
-import type { ShopId } from "./types";
+import type { Game, HeroId, ShopId } from "./types";
 import type { DebugField } from "./sim";
 import * as audio from "./audio";
 import { startVoice } from "./mic";
@@ -39,7 +40,9 @@ export function GameView() {
   const [ready, setReady] = useState(false);
   const [muted, setMuted] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
+  const [shopTab, setShopTab] = useState<"base" | "guest">("base");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [codexOpen, setCodexOpen] = useState(false);
   const { user, isPending } = useCurrentUserState();
 
   useEffect(() => {
@@ -138,7 +141,7 @@ export function GameView() {
           applyMeta(g, mergeMeta(snapshotMeta(g), { version: 2, ...remote }));
         }
         setCloudFlush((m) => {
-          void putCloudSave({ data: { highWave: m.highWave, bank: m.bank, markBank: m.markBank, shop: m.shop } }).catch(
+          void putCloudSave({ data: { highWave: m.highWave, bank: m.bank, markBank: m.markBank, guestStock: m.guestStock, shop: m.shop } }).catch(
             () => {},
           );
         });
@@ -174,7 +177,9 @@ export function GameView() {
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     const p = toLocal(e);
+    const picking = g.guestPick;
     if (g.mode === "playing" || g.mode === "buff") onPointerDown(g, p.x, p.y);
+    if (g.guestPick !== picking) setTick((n) => n + 1);
   };
   const onMove = (e: React.PointerEvent) => {
     const g = gameRef.current;
@@ -231,12 +236,31 @@ export function GameView() {
           <div className="overlay-scrim is-shop">
             <div className="overlay-panel enter shop-panel">
               <div className="shop-head">
-                <div className="ribbon stagger">基礎強化</div>
+                <div className="shop-tabs" role="tablist">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={shopTab === "base"}
+                    className={shopTab === "base" ? "on" : ""}
+                    onClick={() => setShopTab("base")}
+                  >
+                    基礎強化
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={shopTab === "guest"}
+                    className={shopTab === "guest" ? "on" : ""}
+                    onClick={() => setShopTab("guest")}
+                  >
+                    侵食の客
+                  </button>
+                </div>
                 {g.lastEarned > 0 && <p className="shop-gain stagger">今回獲得 +{g.lastEarned} 両</p>}
                 {g.lastMarks > 0 && <p className="shop-gain stagger">今回華 +{g.lastMarks}</p>}
                 <p className="shop-bank stagger">
                   所持両 <strong>{g.bank}</strong>
-                  {g.markBank > 0 ? <>　華 <strong>{g.markBank}</strong></> : null}
+                  　華 <strong>{g.markBank}</strong>
                   {g.debug && (
                     <span className="debug-step inline">
                       <button type="button" onClick={() => { debugNudge(g, "bank", -1); setTick((n) => n + 1); }}>−</button>
@@ -244,11 +268,22 @@ export function GameView() {
                     </span>
                   )}
                 </p>
-                {g.bank <= 0 && g.lastEarned <= 0 && (
+                {shopTab === "base" && g.bank <= 0 && g.lastEarned <= 0 && (
                   <p className="shop-hint stagger">両がありません。ランで稼ぐと強化できます。</p>
+                )}
+                {shopTab === "guest" && (
+                  <p className="shop-hint stagger">種類ごとに華で在庫を増やす。挑戦中は右上の枠から空マスへ置く。</p>
                 )}
               </div>
               <div className="shop-scroll">
+                {shopTab === "guest" ? (
+                  <div className="shop-list">
+                    {GUEST_KINDS.map((kind) => (
+                      <GuestRow key={kind.id} g={g} id={kind.id} onChange={() => setTick((n) => n + 1)} />
+                    ))}
+                  </div>
+                ) : (
+                  <>
                 <div className="shop-list">
                   {SHOP_ITEMS.map((item) => (
                     <ShopRow key={item.id} g={g} id={item.id} name={item.name} desc={item.desc} onChange={() => setTick((n) => n + 1)} />
@@ -291,6 +326,8 @@ export function GameView() {
                     </div>
                   </>
                 )}
+                  </>
+                )}
               </div>
               <div className="shop-foot">
                 <button type="button" className="cta stagger" onClick={start} disabled={!ready}>
@@ -323,8 +360,8 @@ export function GameView() {
               <button type="button" className="ghost-btn stagger" onClick={() => setShopOpen(true)}>
                 式神強化
               </button>
-              <button type="button" className="ghost-btn stagger" onClick={() => setSettingsOpen(true)}>
-                設定
+              <button type="button" className="ghost-btn stagger" onClick={() => setCodexOpen(true)}>
+                図鑑
               </button>
               {!ready && <p className="shimmer stagger">式神を呼び出しています</p>}
               <p className="stat-line stagger">
@@ -333,6 +370,7 @@ export function GameView() {
               <p className="shop-bank stagger">
                 所持両 <strong>{g?.bank ?? 0}</strong>
                 {g && g.markBank > 0 ? <>　華 <strong>{g.markBank}</strong></> : null}
+                {g && GUEST_KINDS.some((k) => (g.guestStock[k.id] ?? 0) > 0) ? <>　客神 {guestLine(g.guestStock)}</> : null}
                 {g && (g.shop.atk > 0 || g.shop.spd > 0 || g.shop.coin > 0) ? (
                   <>
                     <br />
@@ -486,8 +524,8 @@ export function GameView() {
               >
                 タイトルへ
               </button>
-              <button type="button" className="ghost-btn stagger" onClick={() => setSettingsOpen(true)}>
-                設定
+              <button type="button" className="ghost-btn stagger" onClick={() => setCodexOpen(true)}>
+                図鑑
               </button>
             </div>
           </div>
@@ -517,8 +555,8 @@ export function GameView() {
               >
                 タイトルへ
               </button>
-              <button type="button" className="ghost-btn stagger" onClick={() => setSettingsOpen(true)}>
-                設定
+              <button type="button" className="ghost-btn stagger" onClick={() => setCodexOpen(true)}>
+                図鑑
               </button>
             </div>
           </div>
@@ -546,6 +584,39 @@ export function GameView() {
           </button>
         )}
         {showPlayHud && g && <DebugDock g={g} onChange={() => setTick((n) => n + 1)} />}
+        {showPlayHud && ready && g && g.guestPick && (
+          <HeroCard g={g} id={g.guestPick} hint={GUEST_HINT} />
+        )}
+        {showPlayHud && ready && g && (
+          <div className="hud-guests">
+            {GUEST_KINDS.map((kind) => {
+              const left = g.guestLeft[kind.id] ?? 0;
+              const on = g.guestPick === kind.id;
+              return (
+                <button
+                  key={kind.id}
+                  type="button"
+                  className={`hud-icon guest${on ? " on" : ""}`}
+                  aria-label={HEROES[kind.id].name}
+                  aria-pressed={on}
+                  disabled={left <= 0}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (left <= 0) return;
+                    g.guestPick = on ? null : kind.id;
+                    g.drag = null;
+                    g.selectedSlot = null;
+                    setTick((n) => n + 1);
+                  }}
+                >
+                  <img src={`/assets/${kind.id}.png`} alt="" width={40} height={40} />
+                  <span className="n">{on ? "マスへ" : `${HEROES[kind.id].name} ${left}`}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
         <button
           type="button"
           className="hud-icon settings"
@@ -579,6 +650,7 @@ export function GameView() {
             onChange={() => setTick((n) => n + 1)}
           />
         )}
+        {codexOpen && g && <CodexPanel g={g} onClose={() => setCodexOpen(false)} />}
       </div>
     </div>
   );
@@ -669,6 +741,41 @@ function ShopRow({
         <div className="debug-step">
           <button type="button" onClick={() => { debugNudge(g, SHOP_DEBUG_FIELD[id], -1); onChange(); }}>−</button>
           <button type="button" onClick={() => { debugNudge(g, SHOP_DEBUG_FIELD[id], 1); onChange(); }}>＋</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GuestRow({ g, id, onChange }: { g: Game; id: HeroId; onChange: () => void }) {
+  const kind = GUEST_KINDS.find((k) => k.id === id)!;
+  const n = g.guestStock[id] ?? 0;
+  const price = guestCost(kind, n);
+  const maxed = n >= kind.max;
+  const can = !maxed && g.markBank >= price;
+  const hero = HEROES[id];
+  return (
+    <div className="shop-row stagger">
+      <img src={`/assets/${id}.png`} alt="" width={48} height={48} className="guest-face" />
+      <div className="shop-copy">
+        <div className="nm">{hero.name}</div>
+        <div className="lv">在庫 {n} / {kind.max}</div>
+        <div className="st">挑戦中にこの顔を選んで空マスへ置く。ランごとにこの在庫まで。</div>
+      </div>
+      <button
+        type="button"
+        className="shop-buy"
+        disabled={!can}
+        onClick={() => {
+          if (buyGuest(g, id)) onChange();
+        }}
+      >
+        {maxed ? "最大" : `${price.toLocaleString("ja-JP")} 華`}
+      </button>
+      {g.debug && (
+        <div className="debug-step">
+          <button type="button" onClick={() => { nudgeGuest(g, id, -1); onChange(); }}>−</button>
+          <button type="button" onClick={() => { nudgeGuest(g, id, 1); onChange(); }}>＋</button>
         </div>
       )}
     </div>

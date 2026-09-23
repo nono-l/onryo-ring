@@ -10,7 +10,14 @@ import {
   BELT_START,
   BOSS_X,
   BOSS_Y,
+  CORE_HERO_IDS,
   HEROES,
+  guestKind,
+  guestCost,
+  hitGuestKind,
+  isGuest,
+  mergeGuestStock,
+  readGuestStock,
   GOLD_EARLY_EVERY,
   GOLD_FAST_KILLS,
   GOLD_LATE_NORMAL,
@@ -78,7 +85,7 @@ import {
   swingTipR,
   temariHpAt,
 } from "./data";
-import type { Ball, Game, Hero, HeroId, Mode, PlayStyle, Projectile, Role, ShopId, ShopUpgrades, WeaponOption } from "./types";
+import type { Ball, Game, Hero, HeroId, Mode, PlayStyle, Projectile, Role, ShopId, ShopUpgrades, WeaponOption, GuestStock } from "./types";
 import * as audio from "./audio";
 import { pollVoice } from "./mic";
 
@@ -92,23 +99,25 @@ export type MetaSave = {
   highWave: number;
   bank: number;
   markBank: number;
+  guestStock: GuestStock;
   shop: ShopUpgrades;
 };
 
 function emptyMeta(): MetaSave {
-  return { version: 2, highWave: 0, bank: 0, markBank: 0, shop: readShop() };
+  return { version: 2, highWave: 0, bank: 0, markBank: 0, guestStock: readGuestStock(null), shop: readShop() };
 }
 
 function loadMeta(): MetaSave {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return emptyMeta();
-    const p = JSON.parse(raw) as Partial<MetaSave> & { highWave?: number };
+    const p = JSON.parse(raw) as Partial<MetaSave> & { highWave?: number; guestBank?: number };
     return {
       version: 2,
       highWave: p.highWave ?? 0,
       bank: p.bank ?? 0,
       markBank: p.markBank ?? 0,
+      guestStock: readGuestStock(p.guestStock, p.guestBank),
       shop: readShop(p.shop),
     };
   } catch {
@@ -117,7 +126,7 @@ function loadMeta(): MetaSave {
 }
 
 export function snapshotMeta(g: Game): MetaSave {
-  return { version: 2, highWave: g.highWave, bank: g.bank, markBank: g.markBank, shop: { ...g.shop } };
+  return { version: 2, highWave: g.highWave, bank: g.bank, markBank: g.markBank, guestStock: { ...g.guestStock }, shop: { ...g.shop } };
 }
 
 export function mergeMeta(a: MetaSave, b: MetaSave): MetaSave {
@@ -126,6 +135,7 @@ export function mergeMeta(a: MetaSave, b: MetaSave): MetaSave {
     highWave: Math.max(a.highWave, b.highWave),
     bank: Math.max(a.bank, b.bank),
     markBank: Math.max(a.markBank, b.markBank),
+    guestStock: mergeGuestStock(a.guestStock ?? {}, b.guestStock ?? {}),
     shop: {
       atk: Math.max(a.shop.atk, b.shop.atk),
       spd: Math.max(a.shop.spd, b.shop.spd),
@@ -147,6 +157,8 @@ export function applyMeta(g: Game, meta: MetaSave) {
   g.highWave = meta.highWave;
   g.bank = meta.bank;
   g.markBank = meta.markBank;
+  g.guestStock = readGuestStock(meta.guestStock);
+  if (g.demo || g.mode === "title") g.guestLeft = { ...g.guestStock };
   g.shop = readShop(meta.shop);
   if (g.demo || g.mode === "title") applyShop(g);
 }
@@ -306,7 +318,7 @@ export function debugNudge(g: Game, field: DebugField, dir: 1 | -1) {
 }
 
 export function debugUnlockAll(g: Game) {
-  g.unlocked = (Object.keys(HEROES) as HeroId[]).slice();
+  g.unlocked = CORE_HERO_IDS.slice();
 }
 
 export function debugOpenWeapon(g: Game) {
@@ -345,6 +357,49 @@ export function buyShop(g: Game, id: ShopId): boolean {
   if (id === "auto") setAutoMerge(g, true);
   saveMeta(g);
   audio.sfxSelect();
+  return true;
+}
+
+export function nudgeGuest(g: Game, id: HeroId, dir: 1 | -1) {
+  const k = guestKind(id);
+  if (!k) return;
+  g.guestStock[id] = clamp((g.guestStock[id] ?? 0) + dir, 0, k.max);
+  if (g.demo || g.mode === "title") g.guestLeft[id] = g.guestStock[id];
+  saveMeta(g);
+}
+
+export function buyGuest(g: Game, id: HeroId): boolean {
+  const k = guestKind(id);
+  if (!k) return false;
+  const n = g.guestStock[id] ?? 0;
+  if (n >= k.max) return false;
+  const price = guestCost(k, n);
+  if (g.markBank < price) return false;
+  g.markBank -= price;
+  g.guestStock[id] = n + 1;
+  if (g.demo || g.mode === "title") g.guestLeft[id] = g.guestStock[id];
+  saveMeta(g);
+  audio.sfxSelect();
+  return true;
+}
+
+export function placeGuest(g: Game, slot: number): boolean {
+  const id = g.guestPick;
+  if (!id || !isGuest(id)) return false;
+  if (g.mode !== "playing" && !g.demo) return false;
+  const left = g.guestLeft[id] ?? 0;
+  if (left <= 0) return false;
+  if (slot < 0 || slot >= SLOT_COUNT) return false;
+  if (g.slots[slot]) return false;
+  g.guestLeft[id] = left - 1;
+  const hero = seedHero(g, id, slot);
+  hero.stack = 2;
+  g.slots[slot] = hero;
+  const p = slotXY(slot);
+  burst(g, p.x, p.y, "#d4b0f0", 12, "puff");
+  float(g, p.x, p.y - 26, HEROES[id].name, HEROES[id].projectile);
+  recomputePower(g);
+  if (!g.demo) audio.sfxSummon();
   return true;
 }
 
@@ -503,6 +558,9 @@ export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boo
     markBank: meta.markBank,
     marks: 0,
     lastMarks: 0,
+    guestStock: meta.guestStock,
+    guestLeft: { ...meta.guestStock },
+    guestPick: null,
     shop: meta.shop,
     lastEarned: 0,
     weaponOptions: [],
@@ -548,6 +606,7 @@ export function resetRun(g: Game, demo = false) {
   const voiceOn = g.voiceOn;
   const bank = g.bank;
   const markBank = g.markBank;
+  const guestStock = { ...g.guestStock };
   const shop = { ...g.shop };
   const lastEarned = g.lastEarned;
   const lastMarks = g.lastMarks;
@@ -560,6 +619,9 @@ export function resetRun(g: Game, demo = false) {
   g.voiceOn = voiceOn;
   g.bank = bank;
   g.markBank = markBank;
+  g.guestStock = guestStock;
+  g.guestLeft = { ...guestStock };
+  g.guestPick = null;
   g.shop = shop;
   g.lastEarned = demo ? lastEarned : 0;
   g.lastMarks = demo ? lastMarks : 0;
@@ -1327,7 +1389,7 @@ function tryMergeOrSwap(g: Game, from: number, to: number): boolean {
     g.slots[from] = null;
     return true;
   }
-  if (a.defId === b.defId && a.level === b.level && a.level < 8) {
+  if (a.defId === b.defId && !isGuest(a.defId) && a.level === b.level && a.level < 8) {
     const combined = a.stack + b.stack;
     const p = slotXY(to);
     if (combined >= 3) {
@@ -1364,7 +1426,7 @@ function tryAutoMerge(g: Game) {
   if (g.demo || !g.autoMerge || g.shop.auto < 1 || g.drag) return;
   const groups = new Map<string, number[]>();
   g.slots.forEach((h, i) => {
-    if (!h || h.level >= 8) return;
+    if (!h || h.level >= 8 || isGuest(h.defId)) return;
     const k = `${h.defId}:${h.level}`;
     const arr = groups.get(k) ?? [];
     arr.push(i);
@@ -1436,6 +1498,20 @@ export function onPointerDown(g: Game, x: number, y: number) {
   if (hitMute(x, y)) {
     g.muted = !g.muted;
     audio.setMuted(g.muted);
+    return;
+  }
+  const kind = hitGuestKind(x, y);
+  if (kind) {
+    const left = g.guestLeft[kind] ?? 0;
+    g.guestPick = left > 0 && g.guestPick !== kind ? kind : null;
+    g.drag = null;
+    g.selectedSlot = null;
+    return;
+  }
+  if (g.guestPick) {
+    const s = slotAt(x, y);
+    if (s >= 0 && !g.slots[s]) placeGuest(g, s);
+    g.guestPick = null;
     return;
   }
   const s = slotAt(x, y);
@@ -1585,7 +1661,7 @@ function demoBrain(g: Game, dt: number) {
 export function step(g: Game, dt: number) {
   if (g.voiceOn) g.screamMul = pollVoice(dt);
   else g.screamMul = 1;
-  const held = g.playStyle === "manual" && !!g.drag && g.mode === "playing";
+  const held = g.playStyle === "manual" && g.mode === "playing" && (!!g.drag || g.guestPick != null);
   const simming = (g.mode === "playing" && !held) || (g.mode === "title" && g.demo);
   g.t += dt;
   g.shake = Math.max(0, g.shake - dt * 2.4);

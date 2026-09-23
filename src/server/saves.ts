@@ -1,13 +1,14 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { readShop } from "@/game/data";
-import type { ShopUpgrades } from "@/game/types";
+import { readGuestStock, mergeGuestStock, readShop } from "@/game/data";
+import type { GuestStock, ShopUpgrades } from "@/game/types";
 
 export type CloudMeta = {
   highWave: number;
   bank: number;
   markBank: number;
+  guestStock: GuestStock;
   shop: ShopUpgrades;
 };
 
@@ -31,13 +32,16 @@ export const loadCloudSave = createServerFn({ method: "GET" })
       shop_thin: number;
       shop_auto: number;
       mark_bank: number;
-    }>`select high_wave, bank, mark_bank, shop_atk, shop_spd, shop_coin, shop_okiku, shop_path, shop_base, shop_seed, shop_back, shop_arms, shop_slow, shop_thin, shop_auto from player_saves where user_id = ${context.userId} limit 1`;
+      guest_bank: number;
+      guest_stock: unknown;
+    }>`select high_wave, bank, mark_bank, guest_bank, guest_stock, shop_atk, shop_spd, shop_coin, shop_okiku, shop_path, shop_base, shop_seed, shop_back, shop_arms, shop_slow, shop_thin, shop_auto from player_saves where user_id = ${context.userId} limit 1`;
     const row = rows[0];
     if (!row) return null;
     return {
       highWave: row.high_wave,
       bank: row.bank,
       markBank: row.mark_bank ?? 0,
+      guestStock: readGuestStock(row.guest_stock, row.guest_bank ?? 2),
       shop: readShop({
         atk: row.shop_atk,
         spd: row.shop_spd,
@@ -61,13 +65,24 @@ export const putCloudSave = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const shop = readShop(data.shop);
     const sql = await getSql();
+    const prev = await sql<{ guest_bank: number; guest_stock: unknown }>`
+      select guest_bank, guest_stock from player_saves where user_id = ${context.userId} limit 1
+    `;
+    const row = prev[0];
+    const stock = mergeGuestStock(
+      row ? readGuestStock(row.guest_stock, row.guest_bank) : {},
+      readGuestStock(data.guestStock),
+    );
+    const shion = stock.shion ?? 0;
     await sql`
-      insert into player_saves (user_id, high_wave, bank, mark_bank, shop_atk, shop_spd, shop_coin, shop_okiku, shop_path, shop_base, shop_seed, shop_back, shop_arms, shop_slow, shop_thin, shop_auto, updated_at)
-      values (${context.userId}, ${data.highWave}, ${data.bank}, ${data.markBank}, ${shop.atk}, ${shop.spd}, ${shop.coin}, ${shop.okiku}, ${shop.path}, ${shop.base}, ${shop.seed}, ${shop.back}, ${shop.arms}, ${shop.slow}, ${shop.thin}, ${shop.auto}, now())
+      insert into player_saves (user_id, high_wave, bank, mark_bank, guest_bank, guest_stock, shop_atk, shop_spd, shop_coin, shop_okiku, shop_path, shop_base, shop_seed, shop_back, shop_arms, shop_slow, shop_thin, shop_auto, updated_at)
+      values (${context.userId}, ${data.highWave}, ${data.bank}, ${data.markBank}, ${shion}, ${JSON.stringify(stock)}::jsonb, ${shop.atk}, ${shop.spd}, ${shop.coin}, ${shop.okiku}, ${shop.path}, ${shop.base}, ${shop.seed}, ${shop.back}, ${shop.arms}, ${shop.slow}, ${shop.thin}, ${shop.auto}, now())
       on conflict (user_id) do update set
         high_wave = greatest(player_saves.high_wave, excluded.high_wave),
         bank = excluded.bank,
         mark_bank = greatest(player_saves.mark_bank, excluded.mark_bank),
+        guest_bank = greatest(player_saves.guest_bank, excluded.guest_bank),
+        guest_stock = excluded.guest_stock,
         shop_atk = greatest(player_saves.shop_atk, excluded.shop_atk),
         shop_spd = greatest(player_saves.shop_spd, excluded.shop_spd),
         shop_coin = greatest(player_saves.shop_coin, excluded.shop_coin),

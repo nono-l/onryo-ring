@@ -1,7 +1,9 @@
-import type { Game } from "./types";
+import { useRef, useState } from "react";
+import type { Game, HeroId } from "./types";
 import type { DebugField } from "./sim";
-import { debugNudge, debugOpenBuff, debugOpenRoute, debugOpenWeapon, debugUnlockAll, setAutoMerge, setDebugMode, setPlayStyle, setVoiceOn } from "./sim";
+import { debugNudge, debugOpenBuff, debugOpenRoute, debugOpenWeapon, debugUnlockAll, nudgeGuest, setAutoMerge, setDebugMode, setPlayStyle, setVoiceOn } from "./sim";
 import { startVoice, stopVoice, voiceStatus } from "./mic";
+import { GUEST_KINDS, HEROES, HERO_PROFILES, ROSTER_IDS, isGuest, roleLabel } from "./data";
 
 const ROWS: Array<{ id: DebugField; label: string; fmt: (g: Game) => string }> = [
   { id: "bank", label: "所持両", fmt: (g) => String(g.bank) },
@@ -37,6 +39,36 @@ const LIVE: Array<{ id: DebugField; label: string; fmt: (g: Game) => string }> =
   { id: "wave", label: "WAVE", fmt: (g) => String(g.wave) },
   { id: "processed", label: "処理", fmt: (g) => String(g.processed) },
 ];
+
+export function HeroCard({
+  g,
+  id,
+  hint,
+  inPanel = false,
+}: {
+  g: Game;
+  id: HeroId;
+  hint?: string;
+  inPanel?: boolean;
+}) {
+  const d = HEROES[id];
+  const p = HERO_PROFILES[id];
+  return (
+    <div className={`guest-card${inPanel ? " in-panel" : ""}${isGuest(id) ? "" : " roster"}`}>
+      <img src={`/assets/${id}.png`} alt="" width={72} height={72} />
+      <div className="guest-copy">
+        <p className="guest-name">{d.name}</p>
+        <p className="guest-title">{d.title}　{roleLabel(d.role)}</p>
+        <p className="guest-weapon">{p.weapon}</p>
+        <p className="guest-stat">
+          攻撃 {d.atk + g.shop.base}　間隔 {d.interval.toFixed(2)}秒　射程 {d.range}
+        </p>
+        <p className="guest-blurb">{p.blurb}</p>
+        {hint ? <p className="guest-hint">{hint}</p> : null}
+      </div>
+    </div>
+  );
+}
 
 export function SettingsPanel({
   g,
@@ -81,7 +113,7 @@ export function SettingsPanel({
           </div>
           <p className="shop-hint stagger">
             {g.playStyle === "manual"
-              ? "ユニットを動かしている間、円陣は休止と同じく止まる。"
+              ? "ユニットを動かしている間と、客神を置くまでの間、円陣は休止と同じく止まる。"
               : "動かしながら戦う。今までの仕様。"}
           </p>
           <p className="shop-hint stagger">叫び</p>
@@ -179,6 +211,22 @@ export function SettingsPanel({
                     </div>
                   </div>
                 ))}
+                {GUEST_KINDS.map((k) => (
+                  <div key={k.id} className="debug-row">
+                    <div className="shop-copy">
+                      <div className="nm">客神・{HEROES[k.id].name}</div>
+                      <div className="lv">{g.guestStock[k.id] ?? 0}</div>
+                    </div>
+                    <div className="debug-step">
+                      <button type="button" onClick={() => { nudgeGuest(g, k.id, -1); onChange(); }} aria-label="減らす">
+                        −
+                      </button>
+                      <button type="button" onClick={() => { nudgeGuest(g, k.id, 1); onChange(); }} aria-label="増やす">
+                        ＋
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
               <div className="debug-actions">
                 <button type="button" className="ghost-btn" onClick={() => { debugUnlockAll(g); onChange(); }}>
@@ -207,16 +255,98 @@ export function SettingsPanel({
   );
 }
 
-export function DebugDock({ g, onChange }: { g: Game; onChange: () => void }) {
-  if (!g.debug) return null;
+export function CodexPanel({ g, onClose }: { g: Game; onClose: () => void }) {
+  const [face, setFace] = useState<HeroId>("okiku");
   return (
-    <div className="debug-dock">
+    <div className="overlay-scrim is-shop">
+      <div className="overlay-panel enter shop-panel">
+        <div className="shop-head">
+          <div className="ribbon stagger">図鑑</div>
+          <p className="shop-hint stagger">顔を選ぶと、肩書と性能が出る。</p>
+        </div>
+        <div className="shop-scroll">
+          <div className="hero-faces stagger">
+            {ROSTER_IDS.map((id) => (
+              <button
+                key={id}
+                type="button"
+                className={`hero-face${face === id ? " on" : ""}`}
+                onClick={() => setFace(id)}
+              >
+                <img src={`/assets/${id}.png`} alt="" width={48} height={48} />
+                <span>{HEROES[id].name}</span>
+              </button>
+            ))}
+          </div>
+          <HeroCard g={g} id={face} inPanel />
+        </div>
+        <div className="shop-foot">
+          <button type="button" className="ghost-btn stagger" onClick={onClose}>
+            閉じる
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function DebugDock({ g, onChange }: { g: Game; onChange: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const drag = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
+  const moved = useRef(false);
+  if (!g.debug) return null;
+
+  const nudge = (id: DebugField, dir: 1 | -1) => {
+    if (moved.current) {
+      moved.current = false;
+      return;
+    }
+    debugNudge(g, id, dir);
+    onChange();
+  };
+
+  return (
+    <div
+      ref={ref}
+      className="debug-dock"
+      style={{ transform: `translate(${pos.x}px, ${pos.y}px)` }}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        moved.current = false;
+        drag.current = { px: e.clientX, py: e.clientY, x: pos.x, y: pos.y };
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }}
+      onPointerMove={(e) => {
+        const d = drag.current;
+        if (!d) return;
+        const dx = e.clientX - d.px;
+        const dy = e.clientY - d.py;
+        if (Math.hypot(dx, dy) > 5) moved.current = true;
+        if (!moved.current) return;
+        const el = ref.current;
+        const stage = el?.offsetParent as HTMLElement | null;
+        let x = d.x + dx;
+        let y = d.y + dy;
+        if (el && stage) {
+          x = Math.min(stage.clientWidth - el.offsetWidth - el.offsetLeft, Math.max(-el.offsetLeft, x));
+          y = Math.min(stage.clientHeight - el.offsetHeight - el.offsetTop, Math.max(-el.offsetTop, y));
+        }
+        setPos({ x, y });
+      }}
+      onPointerUp={() => {
+        drag.current = null;
+      }}
+      onPointerCancel={() => {
+        drag.current = null;
+      }}
+    >
       {LIVE.map((row) => (
         <div key={row.id} className="debug-dock-row">
           <span>{row.label}</span>
-          <button type="button" onClick={() => { debugNudge(g, row.id, -1); onChange(); }}>−</button>
+          <button type="button" onClick={() => nudge(row.id, -1)}>−</button>
           <b>{row.fmt(g)}</b>
-          <button type="button" onClick={() => { debugNudge(g, row.id, 1); onChange(); }}>＋</button>
+          <button type="button" onClick={() => nudge(row.id, 1)}>＋</button>
         </div>
       ))}
     </div>

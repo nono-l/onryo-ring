@@ -3,7 +3,7 @@
   マスを正方形グリッドに戻すな。円陣は同心円 SLOT_LAYOUT。
   近接の長さは swingLen / swingTip が描画と当たりの唯一の定義。
 */
-import type { HeroDef, HeroId, RouteOption, ShopId, ShopUpgrades, WeaponOption } from "./types";
+import type { HeroDef, HeroId, Role, RouteOption, ShopId, ShopUpgrades, WeaponOption, GuestStock } from "./types";
 
 export const VW = 390;
 export const VH = 844;
@@ -158,6 +158,131 @@ export const HEROES: Record<HeroId, HeroDef> = {
     color: "#e8e4dc",
     projectile: "#7ec8e0",
   },
+  shion: {
+    id: "shion",
+    name: "紫苑",
+    title: "客神",
+    rarity: "elite",
+    role: "melee",
+    atk: 1,
+    interval: 0.84,
+    range: 70,
+    color: "#b080d8",
+    projectile: "#d4b0f0",
+  },
+};
+
+export const CORE_HERO_IDS: HeroId[] = ["okiku", "mio", "kuro", "hakumen", "takaten"];
+
+export type GuestKind = { id: HeroId; cost: number; max: number; start: number };
+
+/** 客神のカタログ。cost は開始在庫からの最初の1体。以後は 3倍。紫苑は 2→8 で約10.9万華。 */
+export const GUEST_KINDS: GuestKind[] = [{ id: "shion", cost: 300, max: 8, start: 2 }];
+
+export const GUEST_ID: HeroId = GUEST_KINDS[0]!.id;
+export const GUEST_TRAY = { x: 306, y: 48, w: 76, h: 90 };
+export const GUEST_TRAY_GAP = 6;
+export const GUEST_CARD = { x: 10, y: 54, w: 288, h: 124 };
+export const GUEST_HINT = "空いているマスを選ぶ";
+
+export type { GuestStock } from "./types";
+
+function clampGuest(n: number, max: number): number {
+  return Math.max(0, Math.min(max, Math.floor(n)));
+}
+
+export function guestKind(id: HeroId): GuestKind | undefined {
+  return GUEST_KINDS.find((k) => k.id === id);
+}
+
+/** 所持 n 体の次。開始在庫までは cost、そのあと 3^(n-start)。 */
+export function guestCost(kind: GuestKind, owned: number): number {
+  const step = Math.max(0, owned - kind.start);
+  return kind.cost * 3 ** step;
+}
+
+export function isGuest(id: HeroId): boolean {
+  return guestKind(id) != null;
+}
+
+export function readGuestStock(raw: unknown, legacyBank?: number): GuestStock {
+  let obj: Record<string, unknown> | null = null;
+  if (typeof raw === "string") {
+    try {
+      const p = JSON.parse(raw) as unknown;
+      if (p && typeof p === "object") obj = p as Record<string, unknown>;
+    } catch {
+      obj = null;
+    }
+  } else if (raw && typeof raw === "object") {
+    obj = raw as Record<string, unknown>;
+  }
+  const out: GuestStock = {};
+  for (const k of GUEST_KINDS) {
+    const n = obj?.[k.id];
+    if (typeof n === "number" && Number.isFinite(n)) out[k.id] = clampGuest(n, k.max);
+  }
+  const first = GUEST_KINDS[0];
+  if (first && typeof legacyBank === "number" && Number.isFinite(legacyBank)) {
+    const legacy = clampGuest(legacyBank, first.max);
+    out[first.id] = Math.max(out[first.id] ?? 0, legacy);
+  }
+  for (const k of GUEST_KINDS) {
+    if (out[k.id] == null) out[k.id] = k.start;
+  }
+  return out;
+}
+
+export function mergeGuestStock(a: GuestStock, b: GuestStock): GuestStock {
+  const out: GuestStock = {};
+  for (const k of GUEST_KINDS) {
+    const av = a[k.id];
+    const bv = b[k.id];
+    out[k.id] = av == null && bv == null ? k.start : Math.min(k.max, Math.max(av ?? 0, bv ?? 0));
+  }
+  return out;
+}
+
+export function guestLine(stock: GuestStock): string {
+  return GUEST_KINDS.map((k) => `${HEROES[k.id].name}${stock[k.id] ?? 0}`).join(" ");
+}
+
+export function guestTrayRect(i: number): { x: number; y: number; w: number; h: number } {
+  return {
+    x: GUEST_TRAY.x,
+    y: GUEST_TRAY.y + i * (GUEST_TRAY.h + GUEST_TRAY_GAP),
+    w: GUEST_TRAY.w,
+    h: GUEST_TRAY.h,
+  };
+}
+
+export function hitGuestKind(x: number, y: number): HeroId | null {
+  for (let i = 0; i < GUEST_KINDS.length; i++) {
+    const r = guestTrayRect(i);
+    if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return GUEST_KINDS[i]!.id;
+  }
+  return null;
+}
+
+export function roleLabel(role: Role): string {
+  return role === "melee" ? "近接" : "遠距離";
+}
+
+export const HERO_PROFILES: Record<HeroId, { weapon: string; blurb: string }> = {
+  okiku: { weapon: "井戸の柄杓", blurb: "井戸から上がった童。円の手前を守る。" },
+  mio: { weapon: "白狐の幣", blurb: "白い狐の巫女。遠くの皿へ光を放つ。" },
+  kuro: { weapon: "二尾の刃", blurb: "短い刃を速く回す。縁に近いほど強い。" },
+  hakumen: { weapon: "無貌の杖", blurb: "顔のない客人。杖の先から怨を飛ばす。" },
+  takaten: { weapon: "白帽の鎌", blurb: "白い帽子の刈り手。鎌は円の外まで届く。" },
+  shion: { weapon: "紫陽のかんざし", blurb: "侵食に招かれた客。花の簪で円の縁を払う。" },
+};
+
+export const ROSTER_IDS: HeroId[] = [...CORE_HERO_IDS, ...GUEST_KINDS.map((k) => k.id)];
+
+export const GUEST_PROFILE = {
+  ...HERO_PROFILES.shion,
+  role: roleLabel("melee"),
+  hint: GUEST_HINT,
 };
 
 export const RARITY_WEIGHT: Record<string, number> = {
@@ -193,6 +318,7 @@ export function swingLen(h: { defId: HeroId; level: number }): number {
   if (h.defId === "okiku") L = 47;
   else if (h.defId === "kuro") L = 46 + h.level * 4;
   else if (h.defId === "takaten") L = 48 + h.level * 4;
+  else if (h.defId === "shion") L = 47;
   else L = 36 + (h.level - 1) * 3;
   return L * s * hs;
 }
@@ -201,6 +327,7 @@ export function swingTipR(h: { defId: HeroId; level: number }): number {
   if (h.defId === "okiku") return 8 + h.level;
   if (h.defId === "kuro") return 6 + h.level;
   if (h.defId === "takaten") return 7 + h.level;
+  if (h.defId === "shion") return 7 + h.level;
   return 5 + h.level;
 }
 
@@ -335,7 +462,7 @@ export const BUFF_POOL: WeaponOption[] = [
   { id: "spd", name: "攻撃速度UP", desc: "振りと攻撃間隔が速くなる" },
   { id: "gold", name: "金運UP", desc: "入手両が増える" },
   { id: "back", name: "花魁バック", desc: "花魁が大きく下がる" },
-  { id: "both", name: "二刀流", desc: "攻撃力と速度が少し上がる" },
+  { id: "both", name: "冴え", desc: "攻撃力と速度が少し上がる" },
 ];
 
 export function routeFor(wave: number): RouteOption[] {
