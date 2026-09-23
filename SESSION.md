@@ -94,7 +94,7 @@ HP（新しく出す皿。既存は据え置き）:
 - Google 連携で `player_saves` に保存。ゲストは localStorage。サインイン時は max マージ。
 - 口寄せ札は召喚コストではなく `twinSummon`。手毬1壊しで追加召喚。
 - 戦闘の HP 減算は `resolveHit` / `hurtBall` / `hurtBoss` だけ。振りや弾から `hp -=` するな。
-- 設定の操作は アクティブ（現行）とマニュアル。マニュアルは `drag` 中と `guestPick` 中だけ simming しない。mode は playing のまま。paused に落とすな。
+- 設定の操作は アクティブ（現行）とマニュアル。マニュアルは `drag` 中と `guestPick` 中だけ simming しない。設定パネルを開いているあいだは `step` しない（mode は変えない。`paused` に落とすな）。デバッグの数値は設定の「デバッグ」タブ内で、戦闘・店・客神・場面に分ける。
 - 叫びは設定 ON で getUserMedia。音量 RMS を 1〜3、スペクトル重心 280–1800Hz を 1〜10。掛けて最大30。静かなときは高さは見ない。`g.screamMul` を heroAtk と liveSpd に掛ける。スピーカーへは繋ぐな。
 
 ## 既知の粗

@@ -3,6 +3,7 @@ import { UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { loadCloudSave, putCloudSave } from "@/server/saves";
 import { GUEST_HINT, GUEST_KINDS, HEROES, guestCost, guestLine, SHOP_ITEMS, SHOP_T2_ITEMS, SHOP_T3_ITEMS, SHOP_T4_ITEMS, SHOP_T3_SPEND, SHOP_T4_SPEND, VH, VW, shopCost, shopMax, shopT1Maxed, shopT2Spent, shopT3Open, shopT3Spent, shopT4Open, shopValue } from "./data";
+import { BUILD_STAMP } from "./build-stamp";
 import { CodexPanel, DebugDock, HeroCard, SettingsPanel } from "./DebugPanel";
 import { draw, loadAssets } from "./draw";
 import {
@@ -42,6 +43,8 @@ export function GameView() {
   const [shopOpen, setShopOpen] = useState(false);
   const [shopTab, setShopTab] = useState<"base" | "guest">("base");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsOpenRef = useRef(false);
+  settingsOpenRef.current = settingsOpen;
   const [codexOpen, setCodexOpen] = useState(false);
   const { user, isPending } = useCurrentUserState();
 
@@ -84,9 +87,13 @@ export function GameView() {
       const raw = Math.min(0.1, (now - last) / 1000);
       last = now;
       acc += raw;
-      while (acc >= STEP) {
-        step(game, STEP);
-        acc -= STEP;
+      if (settingsOpenRef.current) {
+        acc = 0;
+      } else {
+        while (acc >= STEP) {
+          step(game, STEP);
+          acc -= STEP;
+        }
       }
       draw(ctx, game);
       const k = overlayOf(game);
@@ -214,7 +221,7 @@ export function GameView() {
   };
 
   const g = gameRef.current;
-  const showPlayHud = kind === "none" || kind === "paused";
+  const showPlayHud = (kind === "none" || kind === "paused") && !settingsOpen;
 
   return (
     <div className="game-shell">
@@ -345,6 +352,7 @@ export function GameView() {
             <div className="overlay-panel enter">
               <div className="display-sub stagger">ONRYO RING</div>
               <h1 className="display-title stagger">怨霊円陣</h1>
+              <p className="build-stamp stagger">ビルド {BUILD_STAMP}（日本時間）</p>
               <p className="overlay-copy stagger">
                 手前の手毬を壊すと式神が召喚される。
                 花魁は回転寿司のレーンをゴールへ進む。
@@ -630,6 +638,7 @@ export function GameView() {
         >
           設定
         </button>
+        {!settingsOpen && (
         <button
           type="button"
           className={`hud-icon mute${muted ? " on" : ""}`}
@@ -643,6 +652,7 @@ export function GameView() {
         >
           {muted ? "消音" : "音声"}
         </button>
+        )}
         {settingsOpen && g && (
           <SettingsPanel
             g={g}

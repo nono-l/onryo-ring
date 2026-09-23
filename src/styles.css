@@ -133,6 +133,15 @@
   text-transform: uppercase;
 }
 
+.build-stamp {
+  margin: -10px 0 -4px;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  letter-spacing: 0.04em;
+  color: var(--color-paper-dim);
+}
+
 .overlay-copy {
   font-size: 0.92rem;
   line-height: 1.7;
@@ -420,6 +429,10 @@
   padding-top: max(10px, env(safe-area-inset-top));
   padding-bottom: max(10px, env(safe-area-inset-bottom));
 }
+.overlay-scrim.is-modal {
+  z-index: 45;
+  background: color-mix(in oklab, var(--color-ink) 78%, transparent);
+}
 
 .shop-tabs {
   display: grid;
@@ -444,6 +457,15 @@
   background: var(--color-gold);
   border-color: var(--color-gold);
   box-shadow: 0 2px 0 #8a6a28;
+}
+.shop-tabs.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.shop-tabs.four button {
+  letter-spacing: 0.04em;
+  font-size: 0.78rem;
+  padding-inline: 0;
 }
 
 .shop-panel {
@@ -565,7 +587,7 @@
   pointer-events: auto;
 }
 .hud-icon.pause { left: 10px; bottom: 14px; }
-.hud-icon.settings { right: 74px; bottom: 14px; }
+.hud-icon.settings { right: 74px; bottom: 14px; z-index: 46; }
 .hud-icon.mute { right: 10px; bottom: 14px; }
 .hud-icon.mute.on { color: var(--color-gold); }
 .hud-guests {

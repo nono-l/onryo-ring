@@ -40,6 +40,59 @@ const LIVE: Array<{ id: DebugField; label: string; fmt: (g: Game) => string }> =
   { id: "processed", label: "処理", fmt: (g) => String(g.processed) },
 ];
 
+const SHOP_ROW_IDS = new Set<DebugField>([
+  "bank",
+  "markBank",
+  "shopAtk",
+  "shopSpd",
+  "shopCoin",
+  "shopOkiku",
+  "shopPath",
+  "shopBase",
+  "shopSeed",
+  "shopBack",
+  "shopArms",
+  "shopSlow",
+  "shopThin",
+  "shopAuto",
+]);
+const FIGHT_ROWS = ROWS.filter((row) => !SHOP_ROW_IDS.has(row.id));
+const SHOP_ROWS = ROWS.filter((row) => SHOP_ROW_IDS.has(row.id));
+
+type SettingsTab = "play" | "debug";
+type DebugTab = "fight" | "shop" | "guest" | "scene";
+
+function DebugRows({
+  rows,
+  g,
+  onBump,
+}: {
+  rows: Array<{ id: DebugField; label: string; fmt: (g: Game) => string }>;
+  g: Game;
+  onBump: (id: DebugField, dir: 1 | -1) => void;
+}) {
+  return (
+    <div className="shop-list debug-list">
+      {rows.map((row) => (
+        <div key={row.id} className="debug-row">
+          <div className="shop-copy">
+            <div className="nm">{row.label}</div>
+            <div className="lv">{row.fmt(g)}</div>
+          </div>
+          <div className="debug-step">
+            <button type="button" onClick={() => onBump(row.id, -1)} aria-label="減らす">
+              −
+            </button>
+            <button type="button" onClick={() => onBump(row.id, 1)} aria-label="増やす">
+              ＋
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function HeroCard({
   g,
   id,
@@ -79,84 +132,78 @@ export function SettingsPanel({
   onClose: () => void;
   onChange: () => void;
 }) {
+  const [tab, setTab] = useState<SettingsTab>("play");
+  const [debugTab, setDebugTab] = useState<DebugTab>("fight");
   const bump = (id: DebugField, dir: 1 | -1) => {
     debugNudge(g, id, dir);
     onChange();
   };
   return (
-    <div className="overlay-scrim is-shop">
+    <div className="overlay-scrim is-shop is-modal">
       <div className="overlay-panel enter shop-panel">
         <div className="shop-head">
           <div className="ribbon stagger">設定</div>
-          <p className="shop-hint stagger">操作</p>
-          <div className="play-style stagger">
+          <p className="shop-hint stagger">開いているあいだ、円陣は止まる。</p>
+          <div className="shop-tabs" role="tablist" aria-label="設定">
             <button
               type="button"
-              className={`debug-switch${g.playStyle === "active" ? " on" : ""}`}
-              onClick={() => {
-                setPlayStyle(g, "active");
-                onChange();
-              }}
+              role="tab"
+              aria-selected={tab === "play"}
+              className={tab === "play" ? "on" : ""}
+              onClick={() => setTab("play")}
             >
-              アクティブ
+              操作
             </button>
             <button
               type="button"
-              className={`debug-switch${g.playStyle === "manual" ? " on" : ""}`}
-              onClick={() => {
-                setPlayStyle(g, "manual");
-                onChange();
-              }}
+              role="tab"
+              aria-selected={tab === "debug"}
+              className={tab === "debug" ? "on" : ""}
+              onClick={() => setTab("debug")}
             >
-              マニュアル
+              デバッグ
             </button>
           </div>
-          <p className="shop-hint stagger">
-            {g.playStyle === "manual"
-              ? "ユニットを動かしている間と、客神を置くまでの間、円陣は休止と同じく止まる。"
-              : "動かしながら戦う。今までの仕様。"}
-          </p>
-          <p className="shop-hint stagger">叫び</p>
-          <div className="play-style stagger">
-            <button
-              type="button"
-              className={`debug-switch${g.voiceOn ? " on" : ""}`}
-              onClick={() => {
-                setVoiceOn(g, true);
-                void startVoice();
-                onChange();
-              }}
-            >
-              ON
-            </button>
-            <button
-              type="button"
-              className={`debug-switch${!g.voiceOn ? " on" : ""}`}
-              onClick={() => {
-                setVoiceOn(g, false);
-                stopVoice();
-                onChange();
-              }}
-            >
-              OFF
-            </button>
-          </div>
-          <p className="shop-hint stagger">
-            {voiceStatus() === "denied"
-              ? "マイクが拒否されました。ブラウザの許可を出してください。"
-              : g.voiceOn
-                ? "叫んでいるあいだ、大きさで最大3倍、声が高いほどさらに最大10倍。合わせて最大30倍。"
-                : "マイクは使わない。"}
-          </p>
-          {g.shop.auto >= 1 && (
+        </div>
+        <div className="shop-scroll">
+          {tab === "play" && (
             <>
-              <p className="shop-hint stagger">自動重ね</p>
+              <p className="shop-hint stagger">操作</p>
               <div className="play-style stagger">
                 <button
                   type="button"
-                  className={`debug-switch${g.autoMerge ? " on" : ""}`}
+                  className={`debug-switch${g.playStyle === "active" ? " on" : ""}`}
                   onClick={() => {
-                    setAutoMerge(g, true);
+                    setPlayStyle(g, "active");
+                    onChange();
+                  }}
+                >
+                  アクティブ
+                </button>
+                <button
+                  type="button"
+                  className={`debug-switch${g.playStyle === "manual" ? " on" : ""}`}
+                  onClick={() => {
+                    setPlayStyle(g, "manual");
+                    onChange();
+                  }}
+                >
+                  マニュアル
+                </button>
+              </div>
+              <p className="shop-hint stagger">
+                {g.playStyle === "manual"
+                  ? "ユニットを動かしている間と、客神を置くまでの間、円陣は休止と同じく止まる。"
+                  : "動かしながら戦う。今までの仕様。"}
+              </p>
+              <p className="shop-hint stagger">叫び</p>
+              <div className="play-style stagger">
+                <button
+                  type="button"
+                  className={`debug-switch${g.voiceOn ? " on" : ""}`}
+                  onClick={() => {
+                    setVoiceOn(g, true);
+                    void startVoice();
                     onChange();
                   }}
                 >
@@ -164,9 +211,10 @@ export function SettingsPanel({
                 </button>
                 <button
                   type="button"
-                  className={`debug-switch${!g.autoMerge ? " on" : ""}`}
+                  className={`debug-switch${!g.voiceOn ? " on" : ""}`}
                   onClick={() => {
-                    setAutoMerge(g, false);
+                    setVoiceOn(g, false);
+                    stopVoice();
                     onChange();
                   }}
                 >
@@ -174,74 +222,167 @@ export function SettingsPanel({
                 </button>
               </div>
               <p className="shop-hint stagger">
-                {g.autoMerge ? "同じレベルが3体そろうと、重ねてレベルが上がる。" : "自分で重ねる。"}
+                {voiceStatus() === "denied"
+                  ? "マイクが拒否されました。ブラウザの許可を出してください。"
+                  : g.voiceOn
+                    ? "叫んでいるあいだ、大きさで最大3倍、声が高いほどさらに最大10倍。合わせて最大30倍。"
+                    : "マイクは使わない。"}
               </p>
+              {g.shop.auto >= 1 && (
+                <>
+                  <p className="shop-hint stagger">自動重ね</p>
+                  <div className="play-style stagger">
+                    <button
+                      type="button"
+                      className={`debug-switch${g.autoMerge ? " on" : ""}`}
+                      onClick={() => {
+                        setAutoMerge(g, true);
+                        onChange();
+                      }}
+                    >
+                      ON
+                    </button>
+                    <button
+                      type="button"
+                      className={`debug-switch${!g.autoMerge ? " on" : ""}`}
+                      onClick={() => {
+                        setAutoMerge(g, false);
+                        onChange();
+                      }}
+                    >
+                      OFF
+                    </button>
+                  </div>
+                  <p className="shop-hint stagger">
+                    {g.autoMerge ? "同じレベルが3体そろうと、重ねてレベルが上がる。" : "自分で重ねる。"}
+                  </p>
+                </>
+              )}
             </>
           )}
-        </div>
-        <div className="shop-scroll">
-          <p className="shop-hint stagger">開発中。誰でもデバッグを付けられます。</p>
-          <button
-            type="button"
-            className={`debug-switch stagger${g.debug ? " on" : ""}`}
-            onClick={() => {
-              setDebugMode(g, !g.debug);
-              onChange();
-            }}
-          >
-            デバッグ {g.debug ? "ON" : "OFF"}
-          </button>
-          {g.debug && (
+          {tab === "debug" && (
             <>
-              <p className="shop-hint">ヒットボックスを出し、数値を増減できます。</p>
-              <div className="shop-list debug-list">
-                {ROWS.map((row) => (
-                  <div key={row.id} className="debug-row">
-                    <div className="shop-copy">
-                      <div className="nm">{row.label}</div>
-                      <div className="lv">{row.fmt(g)}</div>
-                    </div>
-                    <div className="debug-step">
-                      <button type="button" onClick={() => bump(row.id, -1)} aria-label="減らす">
-                        −
+              <p className="shop-hint stagger">開発中。誰でもデバッグを付けられます。</p>
+              <button
+                type="button"
+                className={`debug-switch stagger${g.debug ? " on" : ""}`}
+                onClick={() => {
+                  setDebugMode(g, !g.debug);
+                  onChange();
+                }}
+              >
+                デバッグ {g.debug ? "ON" : "OFF"}
+              </button>
+              {g.debug ? (
+                <>
+                  <div className="shop-tabs four" role="tablist" aria-label="デバッグ">
+                    {(
+                      [
+                        ["fight", "戦闘"],
+                        ["shop", "店"],
+                        ["guest", "客神"],
+                        ["scene", "場面"],
+                      ] as const
+                    ).map(([id, label]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        role="tab"
+                        aria-selected={debugTab === id}
+                        className={debugTab === id ? "on" : ""}
+                        onClick={() => setDebugTab(id)}
+                      >
+                        {label}
                       </button>
-                      <button type="button" onClick={() => bump(row.id, 1)} aria-label="増やす">
-                        ＋
-                      </button>
-                    </div>
+                    ))}
                   </div>
-                ))}
-                {GUEST_KINDS.map((k) => (
-                  <div key={k.id} className="debug-row">
-                    <div className="shop-copy">
-                      <div className="nm">客神・{HEROES[k.id].name}</div>
-                      <div className="lv">{g.guestStock[k.id] ?? 0}</div>
+                  {debugTab === "fight" && <DebugRows rows={FIGHT_ROWS} g={g} onBump={bump} />}
+                  {debugTab === "shop" && <DebugRows rows={SHOP_ROWS} g={g} onBump={bump} />}
+                  {debugTab === "guest" && (
+                    <div className="shop-list debug-list">
+                      {GUEST_KINDS.map((k) => (
+                        <div key={k.id} className="debug-row">
+                          <div className="shop-copy">
+                            <div className="nm">客神・{HEROES[k.id].name}</div>
+                            <div className="lv">{g.guestStock[k.id] ?? 0}</div>
+                          </div>
+                          <div className="debug-step">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                nudgeGuest(g, k.id, -1);
+                                onChange();
+                              }}
+                              aria-label="減らす"
+                            >
+                              −
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                nudgeGuest(g, k.id, 1);
+                                onChange();
+                              }}
+                              aria-label="増やす"
+                            >
+                              ＋
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <div className="debug-step">
-                      <button type="button" onClick={() => { nudgeGuest(g, k.id, -1); onChange(); }} aria-label="減らす">
-                        −
+                  )}
+                  {debugTab === "scene" && (
+                    <div className="debug-actions">
+                      <button
+                        type="button"
+                        className="ghost-btn"
+                        onClick={() => {
+                          debugUnlockAll(g);
+                          onChange();
+                        }}
+                      >
+                        式神を全解禁
                       </button>
-                      <button type="button" onClick={() => { nudgeGuest(g, k.id, 1); onChange(); }} aria-label="増やす">
-                        ＋
+                      <button
+                        type="button"
+                        className="ghost-btn"
+                        onClick={() => {
+                          debugOpenWeapon(g);
+                          onClose();
+                          onChange();
+                        }}
+                      >
+                        武器3択
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-btn"
+                        onClick={() => {
+                          debugOpenRoute(g);
+                          onClose();
+                          onChange();
+                        }}
+                      >
+                        上級の道
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-btn"
+                        onClick={() => {
+                          debugOpenBuff(g);
+                          onClose();
+                          onChange();
+                        }}
+                      >
+                        金皿3択
                       </button>
                     </div>
-                  </div>
-                ))}
-              </div>
-              <div className="debug-actions">
-                <button type="button" className="ghost-btn" onClick={() => { debugUnlockAll(g); onChange(); }}>
-                  式神を全解禁
-                </button>
-                <button type="button" className="ghost-btn" onClick={() => { debugOpenWeapon(g); onClose(); onChange(); }}>
-                  武器3択
-                </button>
-                <button type="button" className="ghost-btn" onClick={() => { debugOpenRoute(g); onClose(); onChange(); }}>
-                  上級の道
-                </button>
-                <button type="button" className="ghost-btn" onClick={() => { debugOpenBuff(g); onClose(); onChange(); }}>
-                  金皿3択
-                </button>
-              </div>
+                  )}
+                </>
+              ) : (
+                <p className="shop-hint">ONにすると、ヒットボックスと数値の増減が出る。</p>
+              )}
             </>
           )}
         </div>
