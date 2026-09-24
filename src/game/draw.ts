@@ -9,8 +9,8 @@ import {
   GUEST_CARD,
   GUEST_HINT,
   GUEST_KINDS,
-  guestLine,
   guestTrayRect,
+  MARK_BADGE,
   HERO_PROFILES,
   isGuest,
   roleLabel,
@@ -926,6 +926,42 @@ function drawBuffMenu(ctx: CanvasRenderingContext2D, g: Game) {
   ctx.restore();
 }
 
+function drawFlower(ctx: CanvasRenderingContext2D, x: number, y: number, r: number) {
+  ctx.save();
+  ctx.translate(x, y);
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
+    ctx.beginPath();
+    ctx.ellipse(Math.cos(a) * r * 0.42, Math.sin(a) * r * 0.42, r * 0.36, r * 0.48, a, 0, Math.PI * 2);
+    ctx.fillStyle = i % 2 ? "#f0d4ff" : "#c48ae0";
+    ctx.fill();
+  }
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.28, 0, Math.PI * 2);
+  ctx.fillStyle = "#fff4c8";
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawMarkBadge(ctx: CanvasRenderingContext2D, g: Game) {
+  const r = MARK_BADGE;
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(r.x, r.y, r.w, r.h, 12);
+  ctx.fillStyle = "rgba(36,22,48,0.92)";
+  ctx.fill();
+  ctx.strokeStyle = "#e0b8ff";
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+  drawFlower(ctx, r.x + 18, r.y + r.h / 2, 9);
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  ctx.font = '800 16px "Zen Kaku Gothic New", sans-serif';
+  ctx.fillStyle = "#f4e8ff";
+  ctx.fillText(String(g.marks), r.x + r.w - 10, r.y + r.h / 2 + 1);
+  ctx.restore();
+}
+
 function drawGuestTray(ctx: CanvasRenderingContext2D, g: Game) {
   for (let i = 0; i < GUEST_KINDS.length; i++) {
     const kind = GUEST_KINDS[i]!;
@@ -1039,8 +1075,8 @@ function drawGuestCard(ctx: CanvasRenderingContext2D, g: Game) {
 
 function drawHud(ctx: CanvasRenderingContext2D, g: Game) {
   ctx.save();
-  const showMark = g.marks > 0 || g.markBank > 0 || g.mode === "playing";
-  const topH = showMark ? 52 : 44;
+  const showSecond = g.voiceOn;
+  const topH = showSecond ? 52 : 44;
   ctx.fillStyle = "rgba(18,14,10,0.58)";
   ctx.fillRect(0, 0, VW, topH);
   ctx.fillStyle = "rgba(232,193,90,0.28)";
@@ -1070,16 +1106,6 @@ function drawHud(ctx: CanvasRenderingContext2D, g: Game) {
   ctx.font = '700 14px "Zen Kaku Gothic New", sans-serif';
   ctx.fillStyle = "#e8c15a";
   ctx.fillText(coinStr, VW - 14, 23);
-
-  if (g.marks > 0 || g.markBank > 0 || g.mode === "playing") {
-    ctx.textAlign = "left";
-    ctx.font = '700 11px "Zen Kaku Gothic New", sans-serif';
-    ctx.fillStyle = "#d4b4f0";
-    const bits: string[] = [];
-    if (g.marks > 0 || g.markBank > 0) bits.push(`華 ${g.marks}`);
-    if (g.mode === "playing") bits.push(`客神 ${guestLine(g.guestLeft)}`);
-    if (bits.length) ctx.fillText(bits.join("　"), 14, 38);
-  }
 
   if (g.voiceOn) {
     const t = Math.max(0, Math.min(1, (g.screamMul - 1) / 29));
@@ -1288,7 +1314,8 @@ export function draw(ctx: CanvasRenderingContext2D, g: Game) {
   }
 
   drawHud(ctx, g);
-  if (g.mode === "playing") {
+  if (g.mode === "playing" || g.mode === "paused") {
+    drawMarkBadge(ctx, g);
     drawGuestTray(ctx, g);
     if (g.guestPick) drawGuestCard(ctx, g);
   }

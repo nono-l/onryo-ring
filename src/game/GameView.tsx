@@ -22,6 +22,7 @@ import {
   resetRun,
   setCloudFlush,
   setMode,
+  setPlayStyle,
   snapshotMeta,
   step,
 } from "./sim";
@@ -46,7 +47,12 @@ export function GameView() {
   const settingsOpenRef = useRef(false);
   settingsOpenRef.current = settingsOpen;
   const [codexOpen, setCodexOpen] = useState(false);
+  const [failManual, setFailManual] = useState(false);
   const { user, isPending } = useCurrentUserState();
+
+  useEffect(() => {
+    if (kind !== "fail") setFailManual(false);
+  }, [kind]);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,6 +87,8 @@ export function GameView() {
     let acc = 0;
     let raf = 0;
     let lastKind: OverlayKind = "title";
+    let lastMarks = game.marks;
+    let lastGuests = guestLine(game.guestLeft);
     const STEP = 1 / 60;
 
     const loop = (now: number) => {
@@ -100,6 +108,10 @@ export function GameView() {
       if (k !== lastKind) {
         lastKind = k;
         setKind(k);
+        setTick((n) => n + 1);
+      } else if (game.marks !== lastMarks || guestLine(game.guestLeft) !== lastGuests) {
+        lastMarks = game.marks;
+        lastGuests = guestLine(game.guestLeft);
         setTick((n) => n + 1);
       }
       raf = requestAnimationFrame(loop);
@@ -378,7 +390,6 @@ export function GameView() {
               <p className="shop-bank stagger">
                 所持両 <strong>{g?.bank ?? 0}</strong>
                 {g && g.markBank > 0 ? <>　華 <strong>{g.markBank}</strong></> : null}
-                {g && GUEST_KINDS.some((k) => (g.guestStock[k.id] ?? 0) > 0) ? <>　客神 {guestLine(g.guestStock)}</> : null}
                 {g && (g.shop.atk > 0 || g.shop.spd > 0 || g.shop.coin > 0) ? (
                   <>
                     <br />
@@ -409,6 +420,19 @@ export function GameView() {
                   </>
                 )}
               </p>
+              {g && (
+                <div className="title-guests stagger" aria-label="客神">
+                  {GUEST_KINDS.map((k) => {
+                    const n = g.guestStock[k.id] ?? 0;
+                    return (
+                      <span key={k.id} className="title-guest" aria-label={`${HEROES[k.id].name} ${n}`}>
+                        <img src={`/assets/${k.id}.png`} alt="" width={28} height={28} />
+                        <span>{n}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
               <div className="title-links stagger">
                 <a href="/how" className="terms-link">遊び方</a>
                 <a href="/terms" className="terms-link">配信規約</a>
@@ -498,6 +522,29 @@ export function GameView() {
               <p className="overlay-copy stagger">花魁がゴールへ流れ着いた。円陣は破れた。</p>
               {g.lastEarned > 0 && <p className="shop-gain stagger">獲得両 +{g.lastEarned}</p>}
               {g.lastMarks > 0 && <p className="shop-gain stagger">獲得華 +{g.lastMarks}</p>}
+              {g.playStyle === "active" && !failManual && (
+                <>
+                  <p className="shop-hint stagger">掴んでいるあいだ、円陣を止められます。</p>
+                  <div className="play-style stagger" role="group" aria-label="操作">
+                    <button type="button" className="debug-switch on">
+                      アクティブ
+                    </button>
+                    <button
+                      type="button"
+                      className="debug-switch"
+                      onClick={() => {
+                        setPlayStyle(g, "manual");
+                        setFailManual(true);
+                      }}
+                    >
+                      マニュアル
+                    </button>
+                  </div>
+                </>
+              )}
+              {failManual && (
+                <p className="shop-hint stagger">マニュアルにしました。再挑戦から、動かしている間は止まります。</p>
+              )}
               <button
                 type="button"
                 className="cta stagger"
@@ -591,12 +638,25 @@ export function GameView() {
             {kind === "paused" ? "再開" : "休止"}
           </button>
         )}
-        {showPlayHud && g && <DebugDock g={g} onChange={() => setTick((n) => n + 1)} />}
-        {showPlayHud && ready && g && g.guestPick && (
+        {showPlayHud && g && !settingsOpen && <DebugDock g={g} onChange={() => setTick((n) => n + 1)} />}
+        {showPlayHud && ready && g && g.guestPick && !settingsOpen && (
           <HeroCard g={g} id={g.guestPick} hint={GUEST_HINT} />
         )}
-        {showPlayHud && ready && g && (
+        {showPlayHud && ready && g && !settingsOpen && (
           <div className="hud-guests">
+            <div className="hud-mark" aria-label={`華 ${g.marks}`}>
+              <svg className="mark-flower" viewBox="0 0 24 24" aria-hidden="true">
+                <g fill="#e7c8ff">
+                  <ellipse cx="12" cy="5.2" rx="3.1" ry="4.2" />
+                  <ellipse cx="18.6" cy="9.6" rx="3.1" ry="4.2" transform="rotate(72 18.6 9.6)" />
+                  <ellipse cx="16.1" cy="17.2" rx="3.1" ry="4.2" transform="rotate(144 16.1 17.2)" />
+                  <ellipse cx="7.9" cy="17.2" rx="3.1" ry="4.2" transform="rotate(216 7.9 17.2)" />
+                  <ellipse cx="5.4" cy="9.6" rx="3.1" ry="4.2" transform="rotate(288 5.4 9.6)" />
+                </g>
+                <circle cx="12" cy="12" r="2.6" fill="#fff4c8" />
+              </svg>
+              <span className="n">{g.marks}</span>
+            </div>
             {GUEST_KINDS.map((kind) => {
               const left = g.guestLeft[kind.id] ?? 0;
               const on = g.guestPick === kind.id;

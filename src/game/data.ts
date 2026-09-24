@@ -180,7 +180,9 @@ export type GuestKind = { id: HeroId; cost: number; max: number; start: number }
 export const GUEST_KINDS: GuestKind[] = [{ id: "shion", cost: 300, max: 8, start: 2 }];
 
 export const GUEST_ID: HeroId = GUEST_KINDS[0]!.id;
-export const GUEST_TRAY = { x: 306, y: 48, w: 76, h: 90 };
+/** 右上の列。華が先、その下に客神。 */
+export const MARK_BADGE = { x: 306, y: 48, w: 76, h: 40 };
+export const GUEST_TRAY = { x: 306, y: 94, w: 76, h: 90 };
 export const GUEST_TRAY_GAP = 6;
 export const GUEST_CARD = { x: 10, y: 54, w: 288, h: 124 };
 export const GUEST_HINT = "空いているマスを選ぶ";

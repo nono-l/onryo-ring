@@ -468,6 +468,32 @@
   padding-inline: 0;
 }
 
+.settings-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  width: 100%;
+}
+.settings-tabs button {
+  appearance: none;
+  min-height: 40px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in oklab, var(--color-gold) 45%, transparent);
+  background: transparent;
+  color: var(--color-paper);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  padding: 0 4px;
+}
+.settings-tabs button.on {
+  color: var(--color-ink);
+  background: var(--color-gold);
+  border-color: var(--color-gold);
+  box-shadow: 0 2px 0 #8a6a28;
+}
+
 .shop-panel {
   flex: 1 1 auto;
   width: min(100%, 340px);
@@ -557,6 +583,32 @@
 }
 .shop-gain { color: var(--color-gold); }
 .shop-hint { color: var(--color-paper-dim); }
+.title-guests {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+}
+.title-guest {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 2px 10px 2px 2px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, #c8a0e8 70%, var(--color-gold));
+  background: color-mix(in oklab, #241630 82%, transparent);
+  color: #f4e8ff;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.title-guest img {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+}
 
 .shimmer {
   background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--color-gold) 35%, transparent), transparent);
@@ -599,6 +651,31 @@
   flex-direction: column;
   gap: 6px;
   pointer-events: none;
+}
+.hud-mark {
+  pointer-events: none;
+  min-width: 72px;
+  min-height: 40px;
+  padding: 4px 10px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in oklab, #c8a0e8 75%, var(--color-gold));
+  background: color-mix(in oklab, #241630 88%, var(--color-ink));
+  color: #f4e8ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.mark-flower {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+.hud-mark .n {
+  font-weight: 800;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
 }
 .hud-icon.guest {
   position: relative;
