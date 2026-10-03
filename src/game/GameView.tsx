@@ -48,6 +48,7 @@ export function GameView() {
   const settingsOpenRef = useRef(false);
   settingsOpenRef.current = settingsOpen;
   const [codexOpen, setCodexOpen] = useState(false);
+  const [guestOpen, setGuestOpen] = useState(false);
   const [failManual, setFailManual] = useState(false);
   const { user, isPending } = useCurrentUserState();
 
@@ -301,7 +302,7 @@ export function GameView() {
                   <p className="shop-hint stagger">両がありません。ランで稼ぐと強化できます。</p>
                 )}
                 {shopTab === "guest" && (
-                  <p className="shop-hint stagger">種類ごとに華で在庫を増やす。挑戦中は右上の枠から空マスへ置く。</p>
+                  <p className="shop-hint stagger">種類ごとに華で在庫を増やす。挑戦中は右上の華を押して、空マスへ置く。</p>
                 )}
                 {shopTab === "item" && (
                   <p className="shop-hint stagger">名前を一度押すと効果。もう一度で買います。挑戦中は左下の札から。</p>
@@ -663,7 +664,17 @@ export function GameView() {
         )}
         {showPlayHud && ready && g && !settingsOpen && (
           <div className="hud-guests">
-            <div className="hud-mark" aria-label={`華 ${g.marks}`}>
+            <button
+              type="button"
+              className={`hud-mark${guestOpen ? " on" : ""}`}
+              aria-label={`華 ${g.marks}`}
+              aria-expanded={guestOpen}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                setGuestOpen((on) => !on);
+              }}
+            >
               <svg className="mark-flower" viewBox="0 0 24 24" aria-hidden="true">
                 <g fill="#e7c8ff">
                   <ellipse cx="12" cy="5.2" rx="3.1" ry="4.2" />
@@ -675,33 +686,37 @@ export function GameView() {
                 <circle cx="12" cy="12" r="2.6" fill="#fff4c8" />
               </svg>
               <span className="n">{g.marks}</span>
-            </div>
-            {GUEST_KINDS.map((kind) => {
-              const left = g.guestLeft[kind.id] ?? 0;
-              const on = g.guestPick === kind.id;
-              return (
-                <button
-                  key={kind.id}
-                  type="button"
-                  className={`hud-icon guest${on ? " on" : ""}`}
-                  aria-label={HEROES[kind.id].name}
-                  aria-pressed={on}
-                  disabled={left <= 0}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (left <= 0) return;
-                    g.guestPick = on ? null : kind.id;
-                    g.drag = null;
-                    g.selectedSlot = null;
-                    setTick((n) => n + 1);
-                  }}
-                >
-                  <img src={`/assets/${kind.id}.png`} alt="" width={40} height={40} />
-                  <span className="n">{on ? "マスへ" : `${HEROES[kind.id].name} ${left}`}</span>
-                </button>
-              );
-            })}
+            </button>
+            {guestOpen && (
+              <div className="guest-menu">
+                {GUEST_KINDS.map((kind) => {
+                  const left = g.guestLeft[kind.id] ?? 0;
+                  const on = g.guestPick === kind.id;
+                  return (
+                    <button
+                      key={kind.id}
+                      type="button"
+                      className={`hud-icon guest${on ? " on" : ""}`}
+                      aria-label={HEROES[kind.id].name}
+                      aria-pressed={on}
+                      disabled={left <= 0}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (left <= 0) return;
+                        g.guestPick = on ? null : kind.id;
+                        g.drag = null;
+                        g.selectedSlot = null;
+                        setTick((n) => n + 1);
+                      }}
+                    >
+                      <img src={`/assets/${kind.id}.png`} alt="" width={40} height={40} />
+                      <span className="n">{on ? "マスへ" : `${HEROES[kind.id].name} ${left}`}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
         <button

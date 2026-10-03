@@ -1451,8 +1451,6 @@ export function draw(ctx: CanvasRenderingContext2D, g: Game) {
 
   drawHud(ctx, g);
   if (g.mode === "playing" || g.mode === "paused") {
-    drawMarkBadge(ctx, g);
-    drawGuestTray(ctx, g);
     if (g.guestPick) drawGuestCard(ctx, g);
     drawItemShop(ctx, g);
   }

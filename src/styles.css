@@ -719,7 +719,9 @@
   pointer-events: none;
 }
 .hud-mark {
-  pointer-events: none;
+  appearance: none;
+  pointer-events: auto;
+  cursor: pointer;
   min-width: 72px;
   min-height: 40px;
   padding: 4px 10px;
@@ -731,6 +733,17 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
+}
+.hud-mark.on {
+  box-shadow: 0 0 0 2px #e8c8ff;
+}
+.guest-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(46vh, 360px);
+  overflow: auto;
+  pointer-events: auto;
 }
 .mark-flower {
   width: 20px;

@@ -14,7 +14,6 @@ import {
   HEROES,
   guestKind,
   guestCost,
-  hitGuestKind,
   isGuest,
   mergeGuestStock,
   readGuestStock,
@@ -1644,14 +1643,6 @@ export function onPointerDown(g: Game, x: number, y: number) {
   if (hitMute(x, y)) {
     g.muted = !g.muted;
     audio.setMuted(g.muted);
-    return;
-  }
-  const kind = hitGuestKind(x, y);
-  if (kind) {
-    const left = g.guestLeft[kind] ?? 0;
-    g.guestPick = left > 0 && g.guestPick !== kind ? kind : null;
-    g.drag = null;
-    g.selectedSlot = null;
     return;
   }
   if (g.guestPick) {
