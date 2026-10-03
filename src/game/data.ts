@@ -3,7 +3,7 @@
   マスを正方形グリッドに戻すな。円陣は同心円 SLOT_LAYOUT。
   近接の長さは swingLen / swingTip が描画と当たりの唯一の定義。
 */
-import type { HeroDef, HeroId, Role, RouteOption, ShopId, ShopUpgrades, WeaponOption, GuestStock } from "./types";
+import type { HeroDef, HeroId, ItemId, ItemStock, Role, RouteOption, ShopId, ShopUpgrades, WeaponOption, GuestStock } from "./types";
 
 export const VW = 390;
 export const VH = 844;
@@ -312,17 +312,30 @@ export function buffCardRect(i: number): { x: number; y: number; w: number; h: n
   };
 }
 
+/** drawWeapon の scale(s) と、本体側の hs * SWING_REACH をまとめた世界スケール。 */
+function weaponWorldScale(level: number): number {
+  const s = 0.92 + level * 0.18;
+  return s * (SLOT_R / 27) * SWING_REACH;
+}
+
+/** 高天の刃先。drawWeapon の回転前・scale(s) 前。柄の先(+Y)ではなく鎌の先端。 */
+export function takatenBladeLocal(level: number): { x: number; y: number } {
+  return { x: 26 + level * 3, y: 48 + level * 4 };
+}
+
+/** 武器ローカル座標（scale 前）。通常は +Y。高天だけ鎌の刃先。 */
+function weaponLocalTip(h: { defId: HeroId; level: number }): { x: number; y: number } {
+  if (h.defId === "okiku") return { x: 0, y: 47 };
+  if (h.defId === "kuro") return { x: 0, y: 46 + h.level * 4 };
+  if (h.defId === "takaten") return takatenBladeLocal(h.level);
+  if (h.defId === "shion") return { x: 0, y: 47 };
+  return { x: 0, y: 36 + (h.level - 1) * 3 };
+}
+
 /** World length of the drawn weapon. drawWeapon の rotate(+Y) と同じ向き。cos/sin で先端を取ると90度ずれる。 */
 export function swingLen(h: { defId: HeroId; level: number }): number {
-  const hs = (SLOT_R / 27) * SWING_REACH;
-  const s = 0.92 + h.level * 0.18;
-  let L = 38;
-  if (h.defId === "okiku") L = 47;
-  else if (h.defId === "kuro") L = 46 + h.level * 4;
-  else if (h.defId === "takaten") L = 48 + h.level * 4;
-  else if (h.defId === "shion") L = 47;
-  else L = 36 + (h.level - 1) * 3;
-  return L * s * hs;
+  const tip = weaponLocalTip(h);
+  return Math.hypot(tip.x, tip.y) * weaponWorldScale(h.level);
 }
 
 export function swingTipR(h: { defId: HeroId; level: number }): number {
@@ -342,10 +355,13 @@ export function swingTip(
 ): { x: number; y: number } {
   const n = Math.max(1, arms);
   const a = h.swing + (arm * Math.PI * 2) / n;
-  const len = swingLen(h);
+  const tip = weaponLocalTip(h);
+  const k = weaponWorldScale(h.level);
+  const lx = tip.x * k;
+  const ly = tip.y * k;
   return {
-    x: x - Math.sin(a) * len,
-    y: y + Math.cos(a) * len,
+    x: x + lx * Math.cos(a) - ly * Math.sin(a),
+    y: y + lx * Math.sin(a) + ly * Math.cos(a),
   };
 }
 
@@ -620,6 +636,133 @@ export function oiranPaceAt(lv: number): number {
 
 export function temariThinAt(lv: number): number {
   return 0.82 ** Math.max(0, lv);
+}
+
+export const ITEM_SHIGURE = 1.85;
+export const ITEM_WARE = 0.28;
+export const ITEM_SUZU = 1.9;
+export const ITEM_SEIJAKU = 30;
+export const ITEM_KAE = 0.016;
+export const ITEM_KAE_KILL = 2;
+export const ITEM_MAX = 99;
+
+export type ItemDef = {
+  id: ItemId;
+  name: string;
+  short: string;
+  sec: number;
+  cost: number;
+  desc: string;
+};
+
+/** 使い捨て。効果は sec 秒。在庫は両で買い、使った分だけ減る。 */
+export const ITEMS: ItemDef[] = [
+  { id: "senko", name: "線香", short: "線香", sec: 10, cost: 240, desc: "花魁の歩みが止まる。式神と皿の処理は続く。" },
+  { id: "shigure", name: "時雨傘", short: "時雨", sec: 10, cost: 180, desc: "振りと攻撃間隔だけが速くなる。金皿の速度とは別。" },
+  { id: "ware", name: "割れ薬", short: "割れ薬", sec: 10, cost: 160, desc: "今いる手毬と、このあいだに補充される手毬の耐久が大きく下がる。" },
+  { id: "utsushi", name: "口寄せの写し", short: "写し", sec: 10, cost: 220, desc: "このあいだ壊した手毬は、式神がもう1体出る。" },
+  { id: "tanzaku", name: "客神の短冊", short: "短冊", sec: 20, cost: 300, desc: "空マスに客神が1体立つ。在庫は減らない。時間で消える。" },
+  { id: "kinpaku", name: "金箔", short: "金箔", sec: 10, cost: 140, desc: "このあいだ倒した皿の両が倍。華は増えない。" },
+  { id: "hanafubuki", name: "華吹雪", short: "華吹雪", sec: 20, cost: 260, desc: "このあいだ倒したレーンの皿から華が出る。両は通常どおり。" },
+  { id: "kaeshiba", name: "返し刃", short: "返し刃", sec: 5, cost: 200, desc: "当たった皿だけ花魁が大きく下がる。倒したときのバックも厚い。" },
+  { id: "suzu", name: "鈴の輪", short: "鈴", sec: 10, cost: 180, desc: "近接の先端だけ当たりが太くなる。体には当たらない。" },
+  { id: "seijaku", name: "静寂", short: "静寂", sec: 5, cost: 320, desc: "叫びなしで、叫びの倍率が最大になる。" },
+];
+
+export function emptyItemStock(): ItemStock {
+  return {
+    senko: 0,
+    shigure: 0,
+    ware: 0,
+    utsushi: 0,
+    tanzaku: 0,
+    kinpaku: 0,
+    hanafubuki: 0,
+    kaeshiba: 0,
+    suzu: 0,
+    seijaku: 0,
+  };
+}
+
+export function readItemStock(raw: unknown): ItemStock {
+  const out = emptyItemStock();
+  if (!raw || typeof raw !== "object") return out;
+  const o = raw as Partial<Record<ItemId, unknown>>;
+  for (const it of ITEMS) {
+    const n = o[it.id];
+    const v = typeof n === "number" && Number.isFinite(n) ? Math.floor(n) : 0;
+    out[it.id] = Math.max(0, Math.min(ITEM_MAX, v));
+  }
+  return out;
+}
+
+export function mergeItemStock(a: ItemStock, b: ItemStock): ItemStock {
+  const out = emptyItemStock();
+  for (const it of ITEMS) out[it.id] = Math.max(a[it.id] ?? 0, b[it.id] ?? 0);
+  return out;
+}
+
+export function itemDef(id: ItemId): ItemDef {
+  return ITEMS.find((it) => it.id === id)!;
+}
+
+/** 持っているか、効果が残っている道具。戦闘中のチップ順。 */
+export function carriedItems(stock: ItemStock, left: ItemStock): ItemDef[] {
+  return ITEMS.filter((it) => (stock[it.id] ?? 0) > 0 || (left[it.id] ?? 0) > 0);
+}
+
+export function itemChipRect(index: number): { x: number; y: number; w: number; h: number } {
+  const cols = 5;
+  const w = 72;
+  const h = 36;
+  const gap = 4;
+  const col = index % cols;
+  const row = Math.floor(index / cols);
+  const gridW = cols * w + (cols - 1) * gap;
+  const x0 = (VW - gridW) / 2;
+  const y0 = VH - 168;
+  return { x: x0 + col * (w + gap), y: y0 + row * (h + gap), w, h };
+}
+
+/** 挑戦中は左下の「札」だけ。10枚は開いたメニューの中。 */
+export const ITEM_BTN = { x: 10, y: 688, w: 72, h: 40 };
+export const ITEM_MENU = { x: 14, y: 132, w: 362, h: 540 };
+const ITEM_ROW_H = 40;
+
+export function itemMenuRow(i: number): { x: number; y: number; w: number; h: number } {
+  return {
+    x: ITEM_MENU.x + 10,
+    y: ITEM_MENU.y + 46 + i * ITEM_ROW_H,
+    w: ITEM_MENU.w - 20,
+    h: ITEM_ROW_H - 6,
+  };
+}
+
+export function itemCloseRect(): { x: number; y: number; w: number; h: number } {
+  return { x: ITEM_MENU.x + ITEM_MENU.w - 76, y: ITEM_MENU.y + 10, w: 64, h: 28 };
+}
+
+function inItemRect(x: number, y: number, r: { x: number; y: number; w: number; h: number }): boolean {
+  return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+}
+
+export function hitItemButton(x: number, y: number): boolean {
+  return inItemRect(x, y, ITEM_BTN);
+}
+
+export function hitItemClose(x: number, y: number): boolean {
+  return inItemRect(x, y, itemCloseRect());
+}
+
+export function hitItemMenu(x: number, y: number): boolean {
+  return inItemRect(x, y, ITEM_MENU);
+}
+
+export function hitItemRow(x: number, y: number): number {
+  for (let i = 0; i < ITEMS.length; i++) {
+    if (inItemRect(x, y, itemMenuRow(i))) return i;
+  }
+  return -1;
 }
 
 export function shopCost(id: ShopId, lv: number): number {

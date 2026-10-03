@@ -425,9 +425,11 @@
 .overlay-scrim.is-shop {
   justify-content: flex-start;
   overflow: hidden;
-  padding: 10px 16px;
-  padding-top: max(10px, env(safe-area-inset-top));
-  padding-bottom: max(10px, env(safe-area-inset-bottom));
+  z-index: 48;
+  background: color-mix(in oklab, var(--color-ink) 88%, transparent);
+  padding: 12px 12px;
+  padding-top: max(12px, env(safe-area-inset-top));
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
 }
 .overlay-scrim.is-modal {
   z-index: 45;
@@ -457,6 +459,14 @@
   background: var(--color-gold);
   border-color: var(--color-gold);
   box-shadow: 0 2px 0 #8a6a28;
+}
+.shop-tabs.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.shop-tabs.three button {
+  letter-spacing: 0.04em;
+  font-size: 0.82rem;
+  padding-inline: 4px;
 }
 .shop-tabs.four {
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -496,12 +506,17 @@
 
 .shop-panel {
   flex: 1 1 auto;
-  width: min(100%, 340px);
+  width: min(100%, 360px);
   max-height: 100%;
   min-height: 0;
   margin-inline: auto;
   overflow: hidden;
   gap: 10px;
+  padding: 12px 12px 8px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in oklab, var(--color-gold) 34%, transparent);
+  background: color-mix(in oklab, var(--color-ink) 94%, var(--color-ink-soft));
+  box-shadow: 0 16px 36px color-mix(in oklab, black 50%, transparent);
 }
 .shop-head,
 .shop-foot {
@@ -527,9 +542,12 @@
   touch-action: pan-y;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: 10px;
   padding: 2px 2px 8px;
+}
+.shop-scroll > .ribbon {
+  align-self: center;
 }
 .shop-list {
   width: 100%;
@@ -539,6 +557,7 @@
 }
 .shop-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   text-align: left;
@@ -547,7 +566,7 @@
   border-radius: 14px;
   padding: 10px 12px;
 }
-.shop-copy { flex: 1; min-width: 0; }
+.shop-copy { flex: 1 1 10rem; min-width: 8rem; }
 .shop-copy .nm {
   font-family: var(--font-display);
   color: var(--color-gold);
@@ -570,16 +589,63 @@
 }
 .shop-buy:disabled { opacity: 0.4; }
 .guest-face {
-  width: 48px;
-  height: 48px;
+  width: 56px;
+  height: 56px;
   object-fit: cover;
-  border-radius: 10px;
+  border-radius: 12px;
   flex: 0 0 auto;
   background: color-mix(in oklab, var(--color-ink) 70%, transparent);
 }
+.guest-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  background: color-mix(in oklab, var(--color-ink-soft) 88%, var(--color-moss));
+  border: 1px solid color-mix(in oklab, #c8a0e8 45%, var(--color-gold));
+  border-radius: 14px;
+  padding: 10px 12px 12px;
+}
+.guest-row-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.guest-row-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--color-paper-dim);
+  text-wrap: pretty;
+}
+.item-tap {
+  appearance: none;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.guest-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.guest-row-actions .shop-buy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .shop-bank, .shop-gain, .shop-hint, .stat-line {
+  width: 100%;
   font-size: 0.85rem;
+  line-height: 1.5;
   color: var(--color-fog);
+  text-wrap: pretty;
 }
 .shop-gain { color: var(--color-gold); }
 .shop-hint { color: var(--color-paper-dim); }

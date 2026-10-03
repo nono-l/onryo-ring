@@ -38,7 +38,14 @@ import {
   swingLen,
   swingTip,
   swingTipR,
+  takatenBladeLocal,
   armCount,
+  ITEMS,
+  ITEM_BTN,
+  ITEM_MENU,
+  ITEM_SUZU,
+  itemCloseRect,
+  itemMenuRow,
 } from "./data";
 import type { Ball, Game, Hero } from "./types";
 
@@ -643,9 +650,10 @@ function drawWeapon(ctx: CanvasRenderingContext2D, h: Hero, swing = h.swing) {
     ctx.strokeStyle = "#8a8074";
     ctx.lineWidth = 1;
     ctx.strokeRect(-2.2, 4, 4.4, 34 + (lv - 1) * 4);
+    const blade = takatenBladeLocal(lv);
     ctx.beginPath();
     ctx.moveTo(2, 34);
-    ctx.quadraticCurveTo(28 + lv * 4, 28, 26 + lv * 3, 48 + lv * 4);
+    ctx.quadraticCurveTo(28 + lv * 4, 28, blade.x, blade.y);
     ctx.quadraticCurveTo(18, 40, 2, 42);
     ctx.closePath();
     ctx.fillStyle = lv >= 3 ? "#b8ecff" : "#7ec8e0";
@@ -754,8 +762,9 @@ function drawHero(ctx: CanvasRenderingContext2D, g: Game, h: Hero, ox: number, o
     ctx.setLineDash([]);
     for (let i = 0; i < n; i++) {
       const tip = swingTip(h, ox, oy, i, n);
+      const reach = swingTipR(h) * ((g.itemT.suzu ?? 0) > 0 ? ITEM_SUZU : 1);
       ctx.beginPath();
-      ctx.arc(tip.x, tip.y, swingTipR(h), 0, Math.PI * 2);
+      ctx.arc(tip.x, tip.y, reach, 0, Math.PI * 2);
       ctx.fillStyle = "rgba(232,193,90,0.22)";
       ctx.fill();
       ctx.strokeStyle = "rgba(255,236,160,0.7)";
@@ -877,12 +886,13 @@ function drawHitboxes(ctx: CanvasRenderingContext2D, g: Game) {
       ring(p.x, p.y, len, "rgba(50,255,140,0.7)", true);
       for (let i = 0; i < n; i++) {
         const tip = swingTip(h, p.x, p.y, i, n);
+        const reach = swingTipR(h) * ((g.itemT.suzu ?? 0) > 0 ? ITEM_SUZU : 1);
         ctx.beginPath();
         ctx.moveTo(p.x, p.y);
         ctx.lineTo(tip.x, tip.y);
         ctx.strokeStyle = "rgba(50,255,140,0.95)";
         ctx.stroke();
-        ring(tip.x, tip.y, swingTipR(h), "rgba(50,255,140,0.95)");
+        ring(tip.x, tip.y, reach, "rgba(50,255,140,0.95)");
       }
     } else {
       ring(p.x, p.y, def.range, "rgba(80,200,255,0.75)", true);
@@ -1071,6 +1081,132 @@ function drawGuestCard(ctx: CanvasRenderingContext2D, g: Game) {
   ctx.fillStyle = `rgba(232,193,90,${pulse.toFixed(3)})`;
   ctx.fillText(GUEST_HINT, r.x + 12, r.y + r.h - 12);
   ctx.restore();
+}
+
+function drawItemShop(ctx: CanvasRenderingContext2D, g: Game) {
+  if (g.mode !== "playing" && g.mode !== "paused") return;
+  let live = 0;
+  for (const it of ITEMS) if ((g.itemT[it.id] ?? 0) > 0) live += 1;
+  const b = ITEM_BTN;
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(b.x, b.y, b.w, b.h, 10);
+  ctx.fillStyle = g.itemMenu ? "rgba(48,36,18,0.96)" : "rgba(18,14,10,0.88)";
+  ctx.fill();
+  ctx.strokeStyle = live > 0 || g.itemMenu ? "#e8c15a" : "rgba(232,193,90,0.55)";
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = '800 15px "Zen Kaku Gothic New", sans-serif';
+  ctx.fillStyle = "#f4e6c0";
+  ctx.fillText(live > 0 ? `札${live}` : "札", b.x + b.w / 2, b.y + b.h / 2 + 1);
+  ctx.restore();
+  if (!g.itemMenu) return;
+
+  const m = ITEM_MENU;
+  ctx.save();
+  ctx.fillStyle = "rgba(10,8,6,0.55)";
+  ctx.fillRect(0, 0, VW, VH);
+  ctx.beginPath();
+  ctx.roundRect(m.x, m.y, m.w, m.h, 16);
+  ctx.fillStyle = "rgba(22,16,14,0.96)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(232,193,90,0.55)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.font = '800 16px "Zen Kaku Gothic New", sans-serif';
+  ctx.fillStyle = "#e8c15a";
+  ctx.fillText(`札　所持 ${g.bank}両`, m.x + 16, m.y + 24);
+  const c = itemCloseRect();
+  ctx.beginPath();
+  ctx.roundRect(c.x, c.y, c.w, c.h, 8);
+  ctx.fillStyle = "rgba(232,193,90,0.16)";
+  ctx.fill();
+  ctx.textAlign = "center";
+  ctx.font = '700 12px "Zen Kaku Gothic New", sans-serif';
+  ctx.fillStyle = "#f4e6c0";
+  ctx.fillText("閉じる", c.x + c.w / 2, c.y + c.h / 2 + 1);
+
+  for (let i = 0; i < ITEMS.length; i++) {
+    const it = ITEMS[i]!;
+    const r = itemMenuRow(i);
+    const left = g.itemT[it.id] ?? 0;
+    const on = left > 0;
+    const n = g.itemStock[it.id] ?? 0;
+    const afford = g.bank >= it.cost;
+    ctx.beginPath();
+    ctx.roundRect(r.x, r.y, r.w, r.h, 8);
+    ctx.fillStyle = on ? "rgba(48,36,18,0.95)" : "rgba(32,24,20,0.92)";
+    ctx.fill();
+    ctx.strokeStyle = g.itemPeek === i ? "#e8c15a" : on ? "#e8c15a" : n > 0 || afford ? "rgba(232,193,90,0.4)" : "rgba(232,193,90,0.16)";
+    ctx.stroke();
+    ctx.textAlign = "left";
+    ctx.font = '800 13px "Zen Kaku Gothic New", sans-serif';
+    ctx.fillStyle = "#f4e6c0";
+    ctx.fillText(it.short, r.x + 8, r.y + 15);
+    ctx.font = '600 10px "Zen Kaku Gothic New", sans-serif';
+    ctx.fillStyle = "#c8b898";
+    ctx.fillText(`${it.sec}秒`, r.x + 58, r.y + 15);
+    ctx.textAlign = "right";
+    ctx.font = '800 12px "Zen Kaku Gothic New", sans-serif';
+    ctx.fillStyle = on ? "#e8c15a" : n > 0 ? "#f4e6c0" : afford ? "#d4b4f0" : "#6a6258";
+    const label = on ? `${Math.ceil(left)}秒` : n > 0 ? `使う ${n}` : `${it.cost}両`;
+    ctx.fillText(label, r.x + r.w - 8, r.y + r.h / 2 + 1);
+  }
+  const peek = g.itemPeek >= 0 ? ITEMS[g.itemPeek] : undefined;
+  if (peek) {
+    const box = { x: m.x + 10, y: m.y + 46 + ITEMS.length * 40, w: m.w - 20, h: 78 };
+    ctx.beginPath();
+    ctx.roundRect(box.x, box.y, box.w, box.h, 8);
+    ctx.fillStyle = "rgba(48,36,18,0.92)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(232,193,90,0.45)";
+    ctx.stroke();
+    ctx.textAlign = "left";
+    ctx.font = '800 12px "Zen Kaku Gothic New", sans-serif';
+    ctx.fillStyle = "#e8c15a";
+    const n = g.itemStock[peek.id] ?? 0;
+    const on = (g.itemT[peek.id] ?? 0) > 0;
+    const hint = on ? "効いている" : n > 0 ? "もう一度で使う" : "もう一度で買う";
+    ctx.fillText(`${peek.name}　${hint}`, box.x + 8, box.y + 16);
+    ctx.font = '600 11px "Zen Kaku Gothic New", sans-serif';
+    ctx.fillStyle = "#f0e6d4";
+    const lines = wrapItemText(ctx, peek.desc, box.w - 16);
+    lines.forEach((line, i) => ctx.fillText(line, box.x + 8, box.y + 36 + i * 16));
+  }
+  ctx.restore();
+  const btn = ITEM_BTN;
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 10);
+  ctx.fillStyle = "rgba(48,36,18,0.96)";
+  ctx.fill();
+  ctx.strokeStyle = "#e8c15a";
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = '800 15px "Zen Kaku Gothic New", sans-serif';
+  ctx.fillStyle = "#f4e6c0";
+  ctx.fillText("札", btn.x + btn.w / 2, btn.y + btn.h / 2 + 1);
+  ctx.restore();
+}
+
+function wrapItemText(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const ch of text) {
+    const trial = line + ch;
+    if (ctx.measureText(trial).width > maxW && line) {
+      lines.push(line);
+      line = ch;
+    } else line = trial;
+  }
+  if (line) lines.push(line);
+  return lines.slice(0, 2);
 }
 
 function drawHud(ctx: CanvasRenderingContext2D, g: Game) {
@@ -1318,6 +1454,7 @@ export function draw(ctx: CanvasRenderingContext2D, g: Game) {
     drawMarkBadge(ctx, g);
     drawGuestTray(ctx, g);
     if (g.guestPick) drawGuestCard(ctx, g);
+    drawItemShop(ctx, g);
   }
   if (g.debug) drawHitboxes(ctx, g);
   if (g.mode === "buff") drawBuffMenu(ctx, g);

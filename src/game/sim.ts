@@ -84,8 +84,25 @@ import {
   swingTip,
   swingTipR,
   temariHpAt,
+  ITEMS,
+  ITEM_SHIGURE,
+  ITEM_WARE,
+  ITEM_SUZU,
+  ITEM_SEIJAKU,
+  ITEM_KAE,
+  ITEM_KAE_KILL,
+  ITEM_MAX,
+  hitItemButton,
+  hitItemClose,
+  hitItemMenu,
+  hitItemRow,
+  itemDef,
+  emptyItemStock,
+  readItemStock,
+  mergeItemStock,
+  GUEST_ID,
 } from "./data";
-import type { Ball, Game, Hero, HeroId, Mode, PlayStyle, Projectile, Role, ShopId, ShopUpgrades, WeaponOption, GuestStock } from "./types";
+import type { Ball, Game, Hero, HeroId, ItemId, Mode, PlayStyle, Projectile, Role, ShopId, ShopUpgrades, WeaponOption, GuestStock, ItemStock } from "./types";
 import * as audio from "./audio";
 import { pollVoice } from "./mic";
 
@@ -100,11 +117,12 @@ export type MetaSave = {
   bank: number;
   markBank: number;
   guestStock: GuestStock;
+  itemStock: ItemStock;
   shop: ShopUpgrades;
 };
 
 function emptyMeta(): MetaSave {
-  return { version: 2, highWave: 0, bank: 0, markBank: 0, guestStock: readGuestStock(null), shop: readShop() };
+  return { version: 2, highWave: 0, bank: 0, markBank: 0, guestStock: readGuestStock(null), itemStock: emptyItemStock(), shop: readShop() };
 }
 
 function loadMeta(): MetaSave {
@@ -118,6 +136,7 @@ function loadMeta(): MetaSave {
       bank: p.bank ?? 0,
       markBank: p.markBank ?? 0,
       guestStock: readGuestStock(p.guestStock, p.guestBank),
+      itemStock: readItemStock(p.itemStock),
       shop: readShop(p.shop),
     };
   } catch {
@@ -126,7 +145,7 @@ function loadMeta(): MetaSave {
 }
 
 export function snapshotMeta(g: Game): MetaSave {
-  return { version: 2, highWave: g.highWave, bank: g.bank, markBank: g.markBank, guestStock: { ...g.guestStock }, shop: { ...g.shop } };
+  return { version: 2, highWave: g.highWave, bank: g.bank, markBank: g.markBank, guestStock: { ...g.guestStock }, itemStock: { ...g.itemStock }, shop: { ...g.shop } };
 }
 
 export function mergeMeta(a: MetaSave, b: MetaSave): MetaSave {
@@ -136,6 +155,7 @@ export function mergeMeta(a: MetaSave, b: MetaSave): MetaSave {
     bank: Math.max(a.bank, b.bank),
     markBank: Math.max(a.markBank, b.markBank),
     guestStock: mergeGuestStock(a.guestStock ?? {}, b.guestStock ?? {}),
+    itemStock: mergeItemStock(readItemStock(a.itemStock), readItemStock(b.itemStock)),
     shop: {
       atk: Math.max(a.shop.atk, b.shop.atk),
       spd: Math.max(a.shop.spd, b.shop.spd),
@@ -158,6 +178,7 @@ export function applyMeta(g: Game, meta: MetaSave) {
   g.bank = meta.bank;
   g.markBank = meta.markBank;
   g.guestStock = readGuestStock(meta.guestStock);
+  g.itemStock = readItemStock(meta.itemStock);
   if (g.demo || g.mode === "title") g.guestLeft = { ...g.guestStock };
   g.shop = readShop(meta.shop);
   if (g.demo || g.mode === "title") applyShop(g);
@@ -403,6 +424,76 @@ export function placeGuest(g: Game, slot: number): boolean {
   return true;
 }
 
+function dropEphemeral(g: Game) {
+  let gone = false;
+  for (let i = 0; i < g.slots.length; i++) {
+    const h = g.slots[i];
+    if (!h?.ephemeral) continue;
+    g.slots[i] = null;
+    gone = true;
+  }
+  if (gone) recomputePower(g);
+}
+
+function tickItems(g: Game, dt: number) {
+  for (const it of ITEMS) {
+    const t = g.itemT[it.id] ?? 0;
+    if (t <= 0) continue;
+    const next = t - dt;
+    g.itemT[it.id] = next > 0 ? next : 0;
+    if (it.id === "tanzaku" && next <= 0) dropEphemeral(g);
+  }
+}
+
+export function buyItem(g: Game, id: ItemId): boolean {
+  const it = itemDef(id);
+  const n = g.itemStock[id] ?? 0;
+  if (n >= ITEM_MAX) return false;
+  if (g.bank < it.cost) return false;
+  g.bank -= it.cost;
+  g.itemStock[id] = n + 1;
+  saveMeta(g);
+  audio.sfxSelect();
+  return true;
+}
+
+export function useItem(g: Game, id: ItemId): boolean {
+  if (g.mode !== "playing" || g.demo) return false;
+  if (itemOn(g, id)) return false;
+  const n = g.itemStock[id] ?? 0;
+  if (n <= 0) return false;
+  const it = itemDef(id);
+  if (id === "tanzaku") {
+    const slot = firstEmpty(g);
+    if (slot < 0) return false;
+    g.itemStock[id] = n - 1;
+    g.itemT[id] = it.sec;
+    const hero = seedHero(g, GUEST_ID, slot);
+    hero.stack = 2;
+    hero.ephemeral = true;
+    g.slots[slot] = hero;
+    const p = slotXY(slot);
+    burst(g, p.x, p.y, "#d4b0f0", 12, "puff");
+    float(g, p.x, p.y - 26, "短冊", "#d4b0f0");
+    recomputePower(g);
+  } else {
+    g.itemStock[id] = n - 1;
+    g.itemT[id] = it.sec;
+    if (id === "ware") {
+      for (const b of g.stack) {
+        b.hp = Math.max(1, Math.ceil(b.hp * ITEM_WARE));
+        b.maxHp = Math.max(b.hp, Math.ceil(b.maxHp * ITEM_WARE));
+      }
+    }
+    float(g, PIT_X, 120, it.name, "#e8c15a", 1.2);
+  }
+  g.flashBanner = it.name;
+  g.flashT = 1.05;
+  saveMeta(g);
+  if (!g.demo) audio.sfxSelect();
+  return true;
+}
+
 function awardBank(g: Game) {
   if (g.demo || g.lastEarned > 0) return;
   const gain = runBankGain(g.coins, g.wave);
@@ -509,7 +600,17 @@ function heroAtk(g: Game, h: Hero): number {
 }
 
 function liveSpd(g: Game) {
-  return g.spdMul * g.screamMul;
+  const burst = (g.itemT.shigure ?? 0) > 0 ? ITEM_SHIGURE : 1;
+  return g.spdMul * g.screamMul * burst;
+}
+
+function itemOn(g: Game, id: ItemId): boolean {
+  return (g.itemT[id] ?? 0) > 0;
+}
+
+function tipR(g: Game, h: Hero): number {
+  const base = swingTipR(h);
+  return itemOn(g, "suzu") ? base * ITEM_SUZU : base;
 }
 
 export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boolean; playStyle?: PlayStyle; autoMerge?: boolean; voiceOn?: boolean }): Game {
@@ -561,6 +662,12 @@ export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boo
     guestStock: meta.guestStock,
     guestLeft: { ...meta.guestStock },
     guestPick: null,
+    itemStock: meta.itemStock,
+    itemT: emptyItemStock(),
+    itemMenu: false,
+    itemPeek: -1,
+    itemTapAt: 0,
+    itemTapRow: -1,
     shop: meta.shop,
     lastEarned: 0,
     weaponOptions: [],
@@ -634,7 +741,8 @@ function refillStack(g: Game, cap = STACK_CAP) {
   while (g.stack.length < cap && g.spawnQueue.length) {
     const spec = g.spawnQueue.shift()!;
     const live = temariHpAt(g.summonCount, g.rng, g.wave, g.shop.thin);
-    const hp = Math.max(spec.hp, live);
+    const hp0 = Math.max(spec.hp, live);
+    const hp = itemOn(g, "ware") ? Math.max(1, Math.ceil(hp0 * ITEM_WARE)) : hp0;
     g.stack.push(makeBall(g, { hp, pattern: spec.pattern }));
   }
 }
@@ -730,12 +838,17 @@ function popBall(g: Game, b: Ball) {
     if (!g.demo) audio.sfxPop();
     return;
   }
-  const gold = Math.max(1, Math.round((1 + b.maxHp * 0.18) * g.goldMul));
+  let gold = Math.max(1, Math.round((1 + b.maxHp * 0.18) * g.goldMul));
+  if (itemOn(g, "kinpaku")) gold *= 2;
   g.coins += gold;
   float(g, b.x, b.y - 8, `+${gold}`, "#e8c15a");
+  if (itemOn(g, "hanafubuki") && b.kind === "wrap") {
+    g.marks += 1;
+    float(g, b.x, b.y - 22, "+華", "#d4b4f0");
+  }
   noteProcessed(g, b.kind);
   if (b.kind === "wrap") {
-    g.boss.track = Math.min(0.9, g.boss.track + wrapBackAt(g.shop.back) / BELT_SLOTS);
+    g.boss.track = Math.min(0.9, g.boss.track + (wrapBackAt(g.shop.back) * (itemOn(g, "kaeshiba") ? ITEM_KAE_KILL : 1)) / BELT_SLOTS);
     float(g, g.boss.x, g.boss.y - 36, "バック", "#9ad8e8");
     if (b.gold) {
       g.goldKills += 1;
@@ -815,6 +928,9 @@ function hurtBall(g: Game, b: Ball, amount: number): HitResult | null {
   float(g, b.x, b.y, `${Math.round(hit.applied)}`, "#fff8ee");
   burst(g, b.x, b.y, "#fff", 4);
   if (hit.dead) popBall(g, b);
+  else if (itemOn(g, "kaeshiba") && (b.kind === "wrap" || b.kind === "collab")) {
+    g.boss.track = Math.min(0.92, g.boss.track + ITEM_KAE);
+  }
   return hit;
 }
 
@@ -993,7 +1109,7 @@ function tipHits(tip: { x: number; y: number }, r: number, x: number, y: number,
 }
 
 function meleeTipTouching(g: Game, h: Hero, pos: { x: number; y: number }): boolean {
-  const r = swingTipR(h);
+  const r = tipR(g, h);
   const n = armCount(g.shop.arms);
   for (let i = 0; i < n; i++) {
     const tip = swingTip(h, pos.x, pos.y, i, n);
@@ -1051,7 +1167,7 @@ function meleeSweep(g: Game, h: Hero, pos: { x: number; y: number }) {
   // 表示10までは重なったうち最近傍の1体。11以上は cleaveSweep。
   const amount = rollStrike(g, h);
   h.attackT = 1;
-  const r = swingTipR(h);
+  const r = tipR(g, h);
   const n = armCount(g.shop.arms);
   const first = swingTip(h, pos.x, pos.y, 0, n);
   h.targetX = first.x;
@@ -1101,6 +1217,7 @@ function meleeSweep(g: Game, h: Hero, pos: { x: number; y: number }) {
 }
 
 function arcTouches(
+  g: Game,
   h: Hero,
   pos: { x: number; y: number },
   arm: number,
@@ -1109,7 +1226,7 @@ function arcTouches(
   y: number,
   extra: number,
 ): boolean {
-  const r = swingTipR(h);
+  const r = tipR(g, h);
   let d = h.swing - h.prevSwing;
   while (d > Math.PI) d -= Math.PI * 2;
   while (d < -Math.PI) d += Math.PI * 2;
@@ -1139,26 +1256,26 @@ function cleaveSweep(g: Game, h: Hero, pos: { x: number; y: number }) {
   for (let i = 0; i < n; i++) {
     for (const b of g.wrap) {
       if (b.hp <= 0) continue;
-      if (!arcTouches(h, pos, i, n, b.x, b.y, WRAP_ORB_R)) continue;
+      if (!arcTouches(g, h, pos, i, n, b.x, b.y, WRAP_ORB_R)) continue;
       pass(b.id, () => !!hurtBall(g, b, amount!));
     }
     for (const b of g.collab) {
       if (b.hp <= 0) continue;
-      if (!arcTouches(h, pos, i, n, b.x, b.y, COLLAB_ORB_R)) continue;
+      if (!arcTouches(g, h, pos, i, n, b.x, b.y, COLLAB_ORB_R)) continue;
       pass(b.id, () => !!hurtBall(g, b, amount!));
     }
     for (const b of g.falling) {
       if (b.hp <= 0) continue;
-      if (!arcTouches(h, pos, i, n, b.x, b.y, BALL_R)) continue;
+      if (!arcTouches(g, h, pos, i, n, b.x, b.y, BALL_R)) continue;
       pass(b.id, () => !!hurtBall(g, b, amount!));
     }
     if (g.stack.length) {
       const m = g.stack[0]!;
-      if (m.hp > 0 && arcTouches(h, pos, i, n, m.x, m.y, BALL_R)) {
+      if (m.hp > 0 && arcTouches(g, h, pos, i, n, m.x, m.y, BALL_R)) {
         pass(m.id, () => !!hurtBall(g, m, amount!));
       }
     }
-    if (arcTouches(h, pos, i, n, g.boss.x, g.boss.y - 10, 26)) {
+    if (arcTouches(g, h, pos, i, n, g.boss.x, g.boss.y - 10, 26)) {
       pass(-1, () => !!hurtBoss(g, amount!));
     }
   }
@@ -1362,8 +1479,9 @@ export function trySummon(g: Game, opts?: { free?: boolean }): boolean {
   const p = slotXY(slot);
   burst(g, p.x, p.y, "#e8c15a", 10, "puff");
   if (free) float(g, p.x, p.y - 26, "召喚", "#e8c15a");
-  if (free && g.twinSummon > 0) {
-    for (let i = 0; i < g.twinSummon; i++) {
+  if (free && (g.twinSummon > 0 || itemOn(g, "utsushi"))) {
+    const extras = g.twinSummon + (itemOn(g, "utsushi") ? 1 : 0);
+    for (let i = 0; i < extras; i++) {
       const extra = firstEmpty(g);
       if (extra < 0) break;
       const id2 = rollSummon(g);
@@ -1495,6 +1613,34 @@ export function onPointerDown(g: Game, x: number, y: number) {
     return;
   }
   if (g.mode !== "playing") return;
+  if (hitItemButton(x, y)) {
+    g.itemMenu = !g.itemMenu;
+    g.itemPeek = -1;
+    g.itemTapRow = -1;
+    return;
+  }
+  if (g.itemMenu) {
+    if (hitItemClose(x, y) || !hitItemMenu(x, y)) {
+      g.itemMenu = false;
+      g.itemPeek = -1;
+      g.itemTapRow = -1;
+      return;
+    }
+    const row = hitItemRow(x, y);
+    const it = row >= 0 ? ITEMS[row] : undefined;
+    if (!it) return;
+    const now = performance.now();
+    const again = g.itemTapRow === row && now - g.itemTapAt < 400;
+    g.itemTapAt = now;
+    g.itemTapRow = row;
+    g.itemPeek = row;
+    if (!again) return;
+    const active = (g.itemT[it.id] ?? 0) > 0;
+    const n = g.itemStock[it.id] ?? 0;
+    if (!active && n > 0) useItem(g, it.id);
+    else if (!active && n <= 0) buyItem(g, it.id);
+    return;
+  }
   if (hitMute(x, y)) {
     g.muted = !g.muted;
     audio.setMuted(g.muted);
@@ -1661,8 +1807,9 @@ function demoBrain(g: Game, dt: number) {
 export function step(g: Game, dt: number) {
   if (g.voiceOn) g.screamMul = pollVoice(dt);
   else g.screamMul = 1;
+  if ((g.itemT.seijaku ?? 0) > 0) g.screamMul = ITEM_SEIJAKU;
   const held = g.playStyle === "manual" && g.mode === "playing" && (!!g.drag || g.guestPick != null);
-  const simming = (g.mode === "playing" && !held) || (g.mode === "title" && g.demo);
+  const simming = ((g.mode === "playing" && !held && !g.itemMenu) || (g.mode === "title" && g.demo));
   g.t += dt;
   g.shake = Math.max(0, g.shake - dt * 2.4);
   g.justMerged = Math.max(0, g.justMerged - dt);
@@ -1683,6 +1830,8 @@ export function step(g: Game, dt: number) {
     return;
   }
 
+  tickItems(g, dt);
+
   if (g.demo && g.mode === "title") demoBrain(g, dt);
 
   const cap = g.processed >= 4 ? STACK_CAP : STACK_START;
@@ -1700,7 +1849,8 @@ export function step(g: Game, dt: number) {
   }
 
   const packed = g.wrap.length / BELT_SLOTS;
-  g.boss.track -= (0.018 + g.wave * 0.0032 + packed * 0.01) * dt * oiranPaceAt(g.shop.slow);
+  const pace = itemOn(g, "senko") ? 0 : oiranPaceAt(g.shop.slow);
+  g.boss.track -= (0.018 + g.wave * 0.0032 + packed * 0.01) * dt * pace;
   failIfGoal(g);
   refillBelt(g, dt);
   layoutBelt(g, false, dt);

@@ -1,4 +1,16 @@
 export type HeroId = "okiku" | "mio" | "kuro" | "hakumen" | "takaten" | "shion";
+export type ItemId =
+  | "senko"
+  | "shigure"
+  | "ware"
+  | "utsushi"
+  | "tanzaku"
+  | "kinpaku"
+  | "hanafubuki"
+  | "kaeshiba"
+  | "suzu"
+  | "seijaku";
+export type ItemStock = Record<ItemId, number>;
 export type GuestStock = Partial<Record<HeroId, number>>;
 export type Rarity = "common" | "rare" | "elite";
 export type Role = "melee" | "ranged";
@@ -51,6 +63,8 @@ export interface Hero {
   targetY: number;
   buffMul: number;
   rank: number;
+  /** 客神の短冊。時間切れで消す。在庫は消費していない。 */
+  ephemeral?: boolean;
 }
 
 export interface Projectile {
@@ -213,4 +227,12 @@ export interface Game {
   guestStock: GuestStock;
   guestLeft: GuestStock;
   guestPick: HeroId | null;
+  itemStock: ItemStock;
+  itemT: ItemStock;
+  /** 挑戦中の札メニュー。開いているあいだ円陣は止める。 */
+  itemMenu: boolean;
+  /** 札メニューで効果を出している行。-1 は未選択。 */
+  itemPeek: number;
+  itemTapAt: number;
+  itemTapRow: number;
 }

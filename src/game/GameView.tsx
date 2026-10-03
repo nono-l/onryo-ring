@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { loadCloudSave, putCloudSave } from "@/server/saves";
-import { GUEST_HINT, GUEST_KINDS, HEROES, guestCost, guestLine, SHOP_ITEMS, SHOP_T2_ITEMS, SHOP_T3_ITEMS, SHOP_T4_ITEMS, SHOP_T3_SPEND, SHOP_T4_SPEND, VH, VW, shopCost, shopMax, shopT1Maxed, shopT2Spent, shopT3Open, shopT3Spent, shopT4Open, shopValue } from "./data";
+import { GUEST_HINT, GUEST_KINDS, HEROES, ITEMS, guestCost, guestLine, SHOP_ITEMS, SHOP_T2_ITEMS, SHOP_T3_ITEMS, SHOP_T4_ITEMS, SHOP_T3_SPEND, SHOP_T4_SPEND, VH, VW, shopCost, shopMax, shopT1Maxed, shopT2Spent, shopT3Open, shopT3Spent, shopT4Open, shopValue } from "./data";
 import { BUILD_STAMP } from "./build-stamp";
 import { CodexPanel, DebugDock, HeroCard, SettingsPanel } from "./DebugPanel";
 import { draw, loadAssets } from "./draw";
 import {
   applyMeta,
   buyGuest,
+  buyItem,
   buyShop,
   chooseRoute,
   chooseWeapon,
@@ -42,7 +43,7 @@ export function GameView() {
   const [ready, setReady] = useState(false);
   const [muted, setMuted] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
-  const [shopTab, setShopTab] = useState<"base" | "guest">("base");
+  const [shopTab, setShopTab] = useState<"base" | "guest" | "item">("base");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsOpenRef = useRef(false);
   settingsOpenRef.current = settingsOpen;
@@ -160,7 +161,7 @@ export function GameView() {
           applyMeta(g, mergeMeta(snapshotMeta(g), { version: 2, ...remote }));
         }
         setCloudFlush((m) => {
-          void putCloudSave({ data: { highWave: m.highWave, bank: m.bank, markBank: m.markBank, guestStock: m.guestStock, shop: m.shop } }).catch(
+          void putCloudSave({ data: { highWave: m.highWave, bank: m.bank, markBank: m.markBank, guestStock: m.guestStock, itemStock: m.itemStock, shop: m.shop } }).catch(
             () => {},
           );
         });
@@ -255,7 +256,7 @@ export function GameView() {
           <div className="overlay-scrim is-shop">
             <div className="overlay-panel enter shop-panel">
               <div className="shop-head">
-                <div className="shop-tabs" role="tablist">
+                <div className="shop-tabs three" role="tablist">
                   <button
                     type="button"
                     role="tab"
@@ -273,6 +274,15 @@ export function GameView() {
                     onClick={() => setShopTab("guest")}
                   >
                     侵食の客
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={shopTab === "item"}
+                    className={shopTab === "item" ? "on" : ""}
+                    onClick={() => setShopTab("item")}
+                  >
+                    道具
                   </button>
                 </div>
                 {g.lastEarned > 0 && <p className="shop-gain stagger">今回獲得 +{g.lastEarned} 両</p>}
@@ -293,9 +303,18 @@ export function GameView() {
                 {shopTab === "guest" && (
                   <p className="shop-hint stagger">種類ごとに華で在庫を増やす。挑戦中は右上の枠から空マスへ置く。</p>
                 )}
+                {shopTab === "item" && (
+                  <p className="shop-hint stagger">名前を一度押すと効果。もう一度で買います。挑戦中は左下の札から。</p>
+                )}
               </div>
               <div className="shop-scroll">
-                {shopTab === "guest" ? (
+                {shopTab === "item" ? (
+                  <div className="shop-list">
+                    {ITEMS.map((it) => (
+                      <ItemRow key={it.id} g={g} id={it.id} onChange={() => setTick((n) => n + 1)} />
+                    ))}
+                  </div>
+                ) : shopTab === "guest" ? (
                   <div className="shop-list">
                     {GUEST_KINDS.map((kind) => (
                       <GuestRow key={kind.id} g={g} id={kind.id} onChange={() => setTick((n) => n + 1)} />
@@ -817,6 +836,30 @@ function ShopRow({
   );
 }
 
+function ItemRow({ g, id, onChange }: { g: Game; id: (typeof ITEMS)[number]["id"]; onChange: () => void }) {
+  const it = ITEMS.find((item) => item.id === id)!;
+  const n = g.itemStock[id] ?? 0;
+  const can = n < 99 && g.bank >= it.cost;
+  const [open, setOpen] = useState(false);
+  const lastTap = useRef(0);
+  const onTap = () => {
+    const now = performance.now();
+    const again = open && now - lastTap.current < 400;
+    lastTap.current = now;
+    setOpen(true);
+    if (again && buyItem(g, id)) onChange();
+  };
+  return (
+    <div className="guest-row stagger">
+      <button type="button" className="shop-copy item-tap" onClick={onTap}>
+        <div className="nm">{it.name}</div>
+        <div className="lv">所持 {n}　{it.sec}秒　{it.cost.toLocaleString("ja-JP")} 両</div>
+      </button>
+      {open && <p className="guest-row-hint">{it.desc}　{can ? "もう一度で買う" : n >= 99 ? "最大" : "両が足りません"}</p>}
+    </div>
+  );
+}
+
 function GuestRow({ g, id, onChange }: { g: Game; id: HeroId; onChange: () => void }) {
   const kind = GUEST_KINDS.find((k) => k.id === id)!;
   const n = g.guestStock[id] ?? 0;
@@ -825,29 +868,33 @@ function GuestRow({ g, id, onChange }: { g: Game; id: HeroId; onChange: () => vo
   const can = !maxed && g.markBank >= price;
   const hero = HEROES[id];
   return (
-    <div className="shop-row stagger">
-      <img src={`/assets/${id}.png`} alt="" width={48} height={48} className="guest-face" />
-      <div className="shop-copy">
-        <div className="nm">{hero.name}</div>
-        <div className="lv">在庫 {n} / {kind.max}</div>
-        <div className="st">挑戦中にこの顔を選んで空マスへ置く。ランごとにこの在庫まで。</div>
-      </div>
-      <button
-        type="button"
-        className="shop-buy"
-        disabled={!can}
-        onClick={() => {
-          if (buyGuest(g, id)) onChange();
-        }}
-      >
-        {maxed ? "最大" : `${price.toLocaleString("ja-JP")} 華`}
-      </button>
-      {g.debug && (
-        <div className="debug-step">
-          <button type="button" onClick={() => { nudgeGuest(g, id, -1); onChange(); }}>−</button>
-          <button type="button" onClick={() => { nudgeGuest(g, id, 1); onChange(); }}>＋</button>
+    <div className="guest-row stagger">
+      <div className="guest-row-top">
+        <img src={`/assets/${id}.png`} alt="" width={56} height={56} className="guest-face" />
+        <div className="shop-copy">
+          <div className="nm">{hero.name}</div>
+          <div className="lv">在庫 {n} / {kind.max}</div>
         </div>
-      )}
+      </div>
+      <p className="guest-row-hint">右上の顔を選んで空マスへ置く。ラン開始時にこの在庫まで。</p>
+      <div className="guest-row-actions">
+        <button
+          type="button"
+          className="shop-buy"
+          disabled={!can}
+          onClick={() => {
+            if (buyGuest(g, id)) onChange();
+          }}
+        >
+          {maxed ? "最大" : `${price.toLocaleString("ja-JP")} 華`}
+        </button>
+        {g.debug && (
+          <div className="debug-step">
+            <button type="button" onClick={() => { nudgeGuest(g, id, -1); onChange(); }}>−</button>
+            <button type="button" onClick={() => { nudgeGuest(g, id, 1); onChange(); }}>＋</button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
