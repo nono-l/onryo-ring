@@ -2,7 +2,7 @@
   客神の在庫と配置。戦闘の進行は sim.ts。
   式神の種と演出は sim にある。指は input.ts が placeGuest を呼ぶ。
 */
-import { GUEST_KINDS, HEROES, SLOT_COUNT, guestCost, guestKind, isGuest, slotXY } from "./data";
+import { GUEST_KINDS, HEROES, SLOT_COUNT, emptyGuestGrowth, guestKind, guestSlipCost, isGuest, slotXY } from "./data";
 import * as audio from "./audio";
 import { saveMeta } from "./persist";
 import { burst, clamp, float, recomputePower, seedHero } from "./sim";
@@ -21,9 +21,11 @@ export function buyGuest(g: Game, id: HeroId): boolean {
   if (!k) return false;
   const n = g.guestStock[id] ?? 0;
   if (n >= k.max) return false;
-  const price = guestCost(k, n);
-  if (g.markBank < price) return false;
-  g.markBank -= price;
+  const row = g.guestGrowth[id] ?? emptyGuestGrowth();
+  const price = guestSlipCost(k, n);
+  if (row.slips < price) return false;
+  row.slips -= price;
+  g.guestGrowth[id] = row;
   g.guestStock[id] = n + 1;
   if (g.demo || g.mode === "title") g.guestLeft[id] = g.guestStock[id];
   saveMeta(g);

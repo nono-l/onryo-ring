@@ -1157,9 +1157,19 @@
   font-size:.62rem
 }
 
-.hud-slip.on {
+.hud-slip.on,
+.hud-slip.peek {
   color:var(--color-gold);
   border-color:var(--color-gold)
+}
+
+.hud-slip-note {
+  margin:0;
+  max-width:326px;
+  color:var(--color-gold);
+  letter-spacing:.04em;
+  line-height:1.35;
+  font-size:.68rem
 }
 
 .hud-slip:disabled {
@@ -1170,6 +1180,44 @@
 .hud-slip small {
   display:block;
   font-weight:700
+}
+
+.gacha-picks {
+  gap:8px;
+  display:flex
+}
+
+.gacha-pick {
+  appearance:none;
+  border:1px solid #e8c15a66;
+  border-radius:14px;
+  min-width:108px;
+  padding:8px 10px 10px;
+  background:#1c1510d6;
+  color:var(--color-paper);
+  flex-direction:column;
+  align-items:center;
+  gap:4px;
+  display:flex
+}
+
+.gacha-pick.on {
+  color:var(--color-gold);
+  border-color:var(--color-gold)
+}
+
+.gacha-pick img {
+  border-radius:10px
+}
+
+.gacha-results {
+  margin:0;
+  padding:0;
+  list-style:none;
+  color:var(--color-gold);
+  letter-spacing:.04em;
+  line-height:1.45;
+  font-size:.78rem
 }
 
 .hud-icon.settings {

@@ -19,6 +19,12 @@ export type Rarity = "common" | "rare" | "elite";
 export type Role = "melee" | "ranged";
 export type BallKind = "stack" | "fall" | "wrap" | "collab";
 export type PlayStyle = "active" | "manual";
+/** 客神ガチャの当たり。刃は攻撃、足は速さ、縁は届く長さ。 */
+export type GuestCardId = "blade" | "step" | "reach";
+export type GuestGrowth = { blade: number; step: number; reach: number; seal: number; slips: number };
+export type GuestGrowthBook = Partial<Record<HeroId, GuestGrowth>>;
+/** 札。peek は一度押すと効果、もう一度で使う。now は一度で使う。 */
+export type ItemTap = "peek" | "now";
 export type Mode = "title" | "playing" | "paused" | "weapon" | "route" | "buff" | "fail" | "clear" | "warn";
 /** 初回の実演。説明文は出さず、操作できたとき次へ進む。 */
 export type LessonStep = "move" | "break" | "merge";
@@ -76,6 +82,8 @@ export interface Hero {
   targetY: number;
   buffMul: number;
   rank: number;
+  /** 客神の縁。1 は強化なし。 */
+  reachMul?: number;
   ephemeral?: boolean;
   /** 客が置いた客神。移動できるのはこの本人だけ。 */
   owner?: string;
@@ -244,6 +252,8 @@ export interface Game {
   lastMarks: number;
   guestStock: GuestStock;
   guestLeft: GuestStock;
+  /** 客神ガチャ。札の段と、封の数。 */
+  guestGrowth: GuestGrowthBook;
   guestPick: HeroId | null;
   /** 客席。盤面は主催の写しで、式神そのものは動かさない。 */
   assist: boolean;
@@ -251,5 +261,7 @@ export interface Game {
   guestListOpen: boolean;
   /** 画面下の「札」を開いたときだけ10枚を出す。常時並べない。 */
   itemListOpen: boolean;
+  /** 札の押し方。未設定は効果を見てから使う。 */
+  itemTap: ItemTap;
   itemT: Record<ItemId, number>;
 }

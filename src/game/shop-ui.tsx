@@ -14,7 +14,6 @@ import {
   SHOP_T4_ITEMS,
   SHOP_T3_SPEND,
   SHOP_T4_SPEND,
-  guestCost,
   shopCost,
   shopMax,
   shopT1Maxed,
@@ -23,6 +22,7 @@ import {
   shopT3Spent,
   shopT4Open,
   shopValue,
+  guestSlipCost,
 } from "./data";
 import { buyGuest, nudgeGuest } from "./guests";
 import { buyShop } from "./picks";
@@ -101,7 +101,7 @@ export function ShopPanel({
             <p className="shop-hint stagger">両がありません。ランで稼ぐと強化できます。</p>
           )}
           {tab === "guest" && (
-            <p className="shop-hint stagger">種類ごとに華で在庫を増やす。挑戦中は右上の枠から空マスへ置く。</p>
+            <p className="shop-hint stagger">在庫は、その客神の札だけで増える。最初の1体は3枚、次から3倍。</p>
           )}
         </div>
         <div className="shop-scroll">
@@ -220,16 +220,17 @@ export function ShopRow({
 export function GuestRow({ g, id, onChange }: { g: Game; id: HeroId; onChange: () => void }) {
   const kind = GUEST_KINDS.find((k) => k.id === id)!;
   const n = g.guestStock[id] ?? 0;
-  const price = guestCost(kind, n);
+  const slips = g.guestGrowth[id]?.slips ?? 0;
+  const price = guestSlipCost(kind, n);
   const maxed = n >= kind.max;
-  const can = !maxed && g.markBank >= price;
+  const can = !maxed && slips >= price;
   const hero = HEROES[id];
   return (
     <div className="shop-row stagger">
       <img src={`/assets/${id}.png`} alt="" width={48} height={48} className="guest-face" />
       <div className="shop-copy">
         <div className="nm">{hero.name}</div>
-        <div className="lv">在庫 {n} / {kind.max}</div>
+        <div className="lv">在庫 {n} / {kind.max}　客神札 {slips}</div>
         <div className="st">挑戦中にこの顔を選んで空マスへ置く。ランごとにこの在庫まで。</div>
       </div>
       <button
@@ -240,7 +241,7 @@ export function GuestRow({ g, id, onChange }: { g: Game; id: HeroId; onChange: (
           if (buyGuest(g, id)) onChange();
         }}
       >
-        {maxed ? "最大" : `${price.toLocaleString("ja-JP")} 華`}
+        {maxed ? "最大" : `${price.toLocaleString("ja-JP")} 札`}
       </button>
       {g.debug && (
         <div className="debug-step">

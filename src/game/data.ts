@@ -3,7 +3,7 @@
   マスを正方形グリッドに戻すな。円陣は同心円 SLOT_LAYOUT。
   近接の長さは swingLen / swingTip が描画と当たりの唯一の定義。
 */
-import type { BuffPickId, GuestStock, HeroDef, HeroId, ItemId, Role, RouteOption, ShopId, ShopUpgrades, WeaponOption, WeaponPickId } from "./types";
+import type { BuffPickId, GuestCardId, GuestGrowth, GuestGrowthBook, GuestStock, HeroDef, HeroId, ItemId, Role, RouteOption, ShopId, ShopUpgrades, WeaponOption, WeaponPickId } from "./types";
 
 export const VW = 390;
 export const VH = 844;
@@ -254,10 +254,10 @@ export function guestKind(id: HeroId): GuestKind | undefined {
   return GUEST_KINDS.find((k) => k.id === id);
 }
 
-/** 所持 n 体の次。開始在庫までは cost、そのあと 3^(n-start)。 */
-export function guestCost(kind: GuestKind, owned: number): number {
+/** 次の1体に使う客神札。開始在庫の次が3枚、以後は3倍。 */
+export function guestSlipCost(kind: GuestKind, owned: number): number {
   const step = Math.max(0, owned - kind.start);
-  return kind.cost * 3 ** step;
+  return 3 * 3 ** step;
 }
 
 export function isGuest(id: HeroId): boolean {
@@ -360,12 +360,12 @@ export function buffCardRect(i: number): { x: number; y: number; w: number; h: n
 }
 
 /** World length of the drawn weapon. drawWeapon の rotate(+Y) と同じ向き。cos/sin で先端を取ると90度ずれる。 */
-export function swingLen(h: { defId: HeroId; level: number }): number {
+export function swingLen(h: { defId: HeroId; level: number; reachMul?: number }): number {
   const hs = (SLOT_R / 27) * SWING_REACH;
   const s = 0.92 + h.level * 0.18;
   const d = HEROES[h.defId];
   const L = d.reachBase + h.level * d.reachPer;
-  return L * s * hs;
+  return L * s * hs * (h.reachMul ?? 1);
 }
 
 export function swingTipR(h: { defId: HeroId; level: number }): number {
@@ -557,6 +557,62 @@ export const PLAY_KEY = "onryo-ring-play";
 export const AUTO_KEY = "onryo-ring-auto";
 export const VOICE_KEY = "onryo-ring-voice";
 export const TUTORIAL_KEY = "onryo-ring-tutorial";
+export const ITEM_TAP_KEY = "onryo-ring-item-tap";
+
+export const GACHA_COST = 100;
+export const GACHA_MULTI = 11;
+export const GACHA_MULTI_COST = 1000;
+export const GUEST_CARD_MAX = 5;
+export const GUEST_CARDS: Array<{ id: GuestCardId; name: string; blurb: string }> = [
+  { id: "blade", name: "刃", blurb: "攻撃" },
+  { id: "step", name: "足", blurb: "振りと間隔" },
+  { id: "reach", name: "縁", blurb: "届く長さ" },
+];
+
+export function emptyGuestGrowth(): GuestGrowth {
+  return { blade: 0, step: 0, reach: 0, seal: 0, slips: 0 };
+}
+
+export function readGuestGrowth(raw: unknown): GuestGrowthBook {
+  const out: GuestGrowthBook = {};
+  for (const k of GUEST_KINDS) out[k.id] = emptyGuestGrowth();
+  if (!raw || typeof raw !== "object") return out;
+  const o = raw as Record<string, unknown>;
+  for (const k of GUEST_KINDS) {
+    const row = o[k.id];
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    const g = emptyGuestGrowth();
+    for (const key of ["blade", "step", "reach", "seal", "slips"] as const) {
+      const n = r[key];
+      const v = typeof n === "number" && Number.isFinite(n) ? Math.floor(n) : 0;
+      const cap = key === "seal" ? 2 : key === "slips" ? 9999 : GUEST_CARD_MAX;
+      g[key] = Math.max(0, Math.min(cap, v));
+    }
+    out[k.id] = g;
+  }
+  return out;
+}
+
+export function mergeGuestGrowth(a: GuestGrowthBook, b: GuestGrowthBook): GuestGrowthBook {
+  const out = readGuestGrowth(null);
+  for (const k of GUEST_KINDS) {
+    const x = a[k.id] ?? emptyGuestGrowth();
+    const y = b[k.id] ?? emptyGuestGrowth();
+    out[k.id] = {
+      blade: Math.max(x.blade, y.blade),
+      step: Math.max(x.step, y.step),
+      reach: Math.max(x.reach, y.reach),
+      seal: Math.max(x.seal, y.seal),
+      slips: Math.max(x.slips, y.slips),
+    };
+  }
+  return out;
+}
+
+export function guestGrowthOf(book: GuestGrowthBook, id: HeroId): GuestGrowth {
+  return book[id] ?? emptyGuestGrowth();
+}
 
 export const START_COINS = 60;
 export const SHOP_MAX = 12;

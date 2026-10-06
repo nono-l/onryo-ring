@@ -2,8 +2,8 @@
   セーブと設定フラグ。盤面のルールは sim.ts。
   ここから sim を import しない。店の倍率の再計算は sim の applyMeta がやる。
 */
-import { AUTO_KEY, DEBUG_KEY, PLAY_KEY, SAVE_KEY, TUTORIAL_KEY, VOICE_KEY, mergeGuestStock, readGuestStock, readShop } from "./data";
-import type { Game, GuestStock, PlayStyle, ShopUpgrades } from "./types";
+import { AUTO_KEY, DEBUG_KEY, ITEM_TAP_KEY, PLAY_KEY, SAVE_KEY, TUTORIAL_KEY, VOICE_KEY, mergeGuestGrowth, mergeGuestStock, readGuestGrowth, readGuestStock, readShop } from "./data";
+import type { Game, GuestGrowthBook, GuestStock, ItemTap, PlayStyle, ShopUpgrades } from "./types";
 
 export type MetaSave = {
   version: number;
@@ -11,11 +11,12 @@ export type MetaSave = {
   bank: number;
   markBank: number;
   guestStock: GuestStock;
+  guestGrowth: GuestGrowthBook;
   shop: ShopUpgrades;
 };
 
 function emptyMeta(): MetaSave {
-  return { version: 2, highWave: 0, bank: 0, markBank: 0, guestStock: readGuestStock(null), shop: readShop() };
+  return { version: 2, highWave: 0, bank: 0, markBank: 0, guestStock: readGuestStock(null), guestGrowth: readGuestGrowth(null), shop: readShop() };
 }
 
 export function loadMeta(): MetaSave {
@@ -29,6 +30,7 @@ export function loadMeta(): MetaSave {
       bank: p.bank ?? 0,
       markBank: p.markBank ?? 0,
       guestStock: readGuestStock(p.guestStock, p.guestBank),
+      guestGrowth: readGuestGrowth(p.guestGrowth),
       shop: readShop(p.shop),
     };
   } catch {
@@ -37,7 +39,7 @@ export function loadMeta(): MetaSave {
 }
 
 export function snapshotMeta(g: Game): MetaSave {
-  return { version: 2, highWave: g.highWave, bank: g.bank, markBank: g.markBank, guestStock: { ...g.guestStock }, shop: { ...g.shop } };
+  return { version: 2, highWave: g.highWave, bank: g.bank, markBank: g.markBank, guestStock: { ...g.guestStock }, guestGrowth: g.guestGrowth, shop: { ...g.shop } };
 }
 
 export function mergeMeta(a: MetaSave, b: MetaSave): MetaSave {
@@ -47,6 +49,7 @@ export function mergeMeta(a: MetaSave, b: MetaSave): MetaSave {
     bank: Math.max(a.bank, b.bank),
     markBank: Math.max(a.markBank, b.markBank),
     guestStock: mergeGuestStock(a.guestStock ?? {}, b.guestStock ?? {}),
+    guestGrowth: mergeGuestGrowth(a.guestGrowth ?? {}, b.guestGrowth ?? {}),
     shop: {
       atk: Math.max(a.shop.atk, b.shop.atk),
       spd: Math.max(a.shop.spd, b.shop.spd),
@@ -70,6 +73,7 @@ export function assignMeta(g: Game, meta: MetaSave) {
   g.bank = meta.bank;
   g.markBank = meta.markBank;
   g.guestStock = readGuestStock(meta.guestStock);
+  g.guestGrowth = readGuestGrowth(meta.guestGrowth);
   if (g.demo || g.mode === "title") g.guestLeft = { ...g.guestStock };
   g.shop = readShop(meta.shop);
 }
@@ -118,6 +122,23 @@ export function setPlayStyle(g: Game, style: PlayStyle) {
   g.playStyle = style;
   try {
     localStorage.setItem(PLAY_KEY, style);
+  } catch {
+    /* private mode */
+  }
+}
+
+export function loadItemTap(): ItemTap {
+  try {
+    return localStorage.getItem(ITEM_TAP_KEY) === "now" ? "now" : "peek";
+  } catch {
+    return "peek";
+  }
+}
+
+export function setItemTap(g: Game, tap: ItemTap) {
+  g.itemTap = tap;
+  try {
+    localStorage.setItem(ITEM_TAP_KEY, tap);
   } catch {
     /* private mode */
   }

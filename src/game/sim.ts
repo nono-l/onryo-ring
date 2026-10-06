@@ -35,6 +35,7 @@ import {
   armCount,
   oiranPaceAt,
   emptyItemT,
+  guestGrowthOf,
   SEIJAKU_MUL,
   SHIGURE_MUL,
   SUZU_MUL,
@@ -73,7 +74,7 @@ import {
 import type { Ball, Game, GuestStock, Hero, HeroId, ItemId, Mode, PlayStyle, Projectile, Role, ShopUpgrades, WeaponOption } from "./types";
 import * as audio from "./audio";
 import { pollVoice } from "./mic";
-import { assignMeta, loadAutoMerge, loadDebugFlag, loadMeta, loadPlayStyle, loadVoiceFlag, saveMeta, type MetaSave } from "./persist";
+import { assignMeta, loadAutoMerge, loadDebugFlag, loadItemTap, loadMeta, loadPlayStyle, loadVoiceFlag, saveMeta, type MetaSave } from "./persist";
 import { tickItems } from "./items";
 import { applyBuff } from "./picks";
 
@@ -294,12 +295,14 @@ export function seedHero(g: Game, defId: HeroId, slot: number, buffMul = 1): Her
     targetY: BOSS_Y,
     buffMul,
     rank: 0,
+    reachMul: isGuest(defId) ? 1 + 0.05 * guestGrowthOf(g.guestGrowth, defId).reach : 1,
   };
 }
 
 function heroAtk(g: Game, h: Hero): number {
   const d = HEROES[h.defId];
   let atk = (d.atk + g.shop.base) * levelMul(h.level) * g.atkMul * h.buffMul * g.screamMul;
+  if (isGuest(h.defId)) atk *= 1 + 0.08 * guestGrowthOf(g.guestGrowth, h.defId).blade;
   if ((g.itemT.seijaku ?? 0) > 0) atk *= SEIJAKU_MUL;
   return atk;
 }
@@ -366,9 +369,11 @@ export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boo
     lastMarks: 0,
     guestStock: meta.guestStock,
     guestLeft: { ...meta.guestStock },
+    guestGrowth: meta.guestGrowth,
     guestPick: null,
     guestListOpen: false,
     itemListOpen: false,
+    itemTap: loadItemTap(),
     assist: false,
     itemT: emptyItemT(),
     shop: meta.shop,
@@ -417,6 +422,7 @@ export function resetRun(g: Game, demo = false) {
   const bank = g.bank;
   const markBank = g.markBank;
   const guestStock = { ...g.guestStock };
+  const guestGrowth = g.guestGrowth;
   const shop = { ...g.shop };
   const lastEarned = g.lastEarned;
   const lastMarks = g.lastMarks;
@@ -431,6 +437,7 @@ export function resetRun(g: Game, demo = false) {
   g.markBank = markBank;
   g.guestStock = guestStock;
   g.guestLeft = { ...guestStock };
+  g.guestGrowth = guestGrowth;
   g.guestPick = null;
   g.shop = shop;
   g.lastEarned = demo ? lastEarned : 0;
@@ -1123,8 +1130,9 @@ function stepProjectiles(g: Game, dt: number) {
 function stepHeroes(g: Game, dt: number) {
   for (const h of g.slots) {
     if (!h) continue;
+    const step = isGuest(h.defId) ? 1 + 0.06 * guestGrowthOf(g.guestGrowth, h.defId).step : 1;
     h.prevSwing = h.swing;
-    h.swing += (1.55 + h.attackT * 3.8) * liveSpd(g) * dt;
+    h.swing += (1.55 + h.attackT * 3.8) * liveSpd(g) * step * dt;
     h.attackT = Math.max(0, h.attackT - dt * (1.7 + liveSpd(g) * 1.1));
     const pos = slotXY(h.slot);
     if (isMultiHit(h.level)) {
@@ -1137,12 +1145,12 @@ function stepHeroes(g: Game, dt: number) {
     const range = heroRange(h);
     if (def.role === "melee") {
       if (!meleeTipTouching(g, h, pos)) continue;
-      h.atkCd = def.interval / liveSpd(g);
+      h.atkCd = def.interval / (liveSpd(g) * step);
       meleeSweep(g, h, pos);
     } else {
       const t = pickTarget(g, pos.x, pos.y, range, def.role, h.buffMul);
       if (!t) continue;
-      h.atkCd = def.interval / liveSpd(g);
+      h.atkCd = def.interval / (liveSpd(g) * step);
       fireRanged(g, h, t);
     }
   }

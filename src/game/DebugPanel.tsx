@@ -3,7 +3,7 @@ import type { Game, HeroId } from "./types";
 import type { DebugField } from "./sim";
 import { debugNudge, debugOpenBuff, debugOpenRoute, debugOpenWeapon, debugSummon, debugUnlockAll } from "./sim";
 import { nudgeGuest } from "./guests";
-import { setAutoMerge, setDebugMode, setPlayStyle, setVoiceOn } from "./persist";
+import { setAutoMerge, setDebugMode, setItemTap, setPlayStyle, setVoiceOn } from "./persist";
 import { startVoice, stopVoice, voiceStatus } from "./mic";
 import { GUEST_KINDS, HEROES, ROSTER_IDS, displayLevel, isGuest, roleLabel } from "./data";
 
@@ -204,6 +204,34 @@ export function SettingsPanel({
                 {g.playStyle === "manual"
                   ? "ユニットを動かしている間と、客神を置くまでの間、円陣は休止と同じく止まる。"
                   : "動かしながら戦う。今までの仕様。"}
+              </p>
+              <p className="shop-hint stagger">札</p>
+              <div className="play-style stagger">
+                <button
+                  type="button"
+                  className={`debug-switch${g.itemTap !== "now" ? " on" : ""}`}
+                  onClick={() => {
+                    setItemTap(g, "peek");
+                    onChange();
+                  }}
+                >
+                  効果を見て使う
+                </button>
+                <button
+                  type="button"
+                  className={`debug-switch${g.itemTap === "now" ? " on" : ""}`}
+                  onClick={() => {
+                    setItemTap(g, "now");
+                    onChange();
+                  }}
+                >
+                  すぐ使う
+                </button>
+              </div>
+              <p className="shop-hint stagger">
+                {g.itemTap === "now"
+                  ? "札を一度押すと、すぐ使う。"
+                  : "札を一度押すと効果が出る。その札をもう一度押すと使う。"}
               </p>
               <p className="shop-hint stagger">叫び</p>
               <div className="play-style stagger">

@@ -5,6 +5,7 @@ import { loadCloudSave, putCloudSave } from "@/server/saves";
 import { GUEST_HINT, GUEST_KINDS, HEROES, guestLine, VH, VW, shopT1Maxed, shopT3Open, shopT4Open, hitMarkBadge, isGuest, ITEMS } from "./data";
 import { BUILD_STAMP } from "./build-stamp";
 import { DebugDock, HeroCard, SettingsPanel } from "./DebugPanel";
+import { GachaPanel } from "./gacha-ui";
 import { draw, loadAssets } from "./draw";
 import {
   applyMeta,
@@ -21,7 +22,7 @@ import { onPointerDown, onPointerMove, onPointerUp, slotAt } from "./input";
 import { chooseRoute, chooseWeapon } from "./picks";
 import { dismissTutorial, mergeMeta, setCloudFlush, setPlayStyle, setTutorialShow, snapshotMeta, tutorialShowMode, tutorialShowsOnStart, type TutorialMode } from "./persist";
 import { armGuestLeft, moveOwnedGuest, refundOwnGuest, spendOwnGuest } from "./guests";
-import type { Game, GuestStock, HeroId, LessonStep } from "./types";
+import type { Game, GuestStock, HeroId, ItemId, LessonStep } from "./types";
 import * as audio from "./audio";
 import { startVoice } from "./mic";
 import { P2PRoom, type PeerInfo } from "@/lib/multiplayer";
@@ -53,11 +54,13 @@ export function GameView() {
   const [ready, setReady] = useState(false);
   const [muted, setMuted] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
+  const [gachaOpen, setGachaOpen] = useState(false);
   const [shopTab, setShopTab] = useState<"base" | "guest">("base");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsOpenRef = useRef(false);
   settingsOpenRef.current = settingsOpen;
   const [lesson, setLesson] = useState<LessonStep | null>(null);
+  const [slipPeek, setSlipPeek] = useState<ItemId | null>(null);
   const [tutorialOn, setTutorialOn] = useState(false);
   const [tutorialMode, setTutorialMode] = useState<TutorialMode>("once");
   const [codexOpen, setCodexOpen] = useState(false);
@@ -243,7 +246,7 @@ export function GameView() {
           applyMeta(g, mergeMeta(snapshotMeta(g), { version: 2, ...remote }));
         }
         setCloudFlush((m) => {
-          void putCloudSave({ data: { highWave: m.highWave, bank: m.bank, markBank: m.markBank, guestStock: m.guestStock, shop: m.shop } }).catch(
+          void putCloudSave({ data: { highWave: m.highWave, bank: m.bank, markBank: m.markBank, guestStock: m.guestStock, guestGrowth: m.guestGrowth, shop: m.shop } }).catch(
             () => {},
           );
         });
@@ -533,7 +536,10 @@ export function GameView() {
             onTitle={() => setShopOpen(false)}
           />
         )}
-        {seat !== "guest" && kind === "title" && !shopOpen && (
+        {seat !== "guest" && kind === "title" && gachaOpen && g && (
+          <GachaPanel g={g} onChange={() => setTick((n) => n + 1)} onTitle={() => setGachaOpen(false)} />
+        )}
+        {seat !== "guest" && kind === "title" && !shopOpen && !gachaOpen && (
           <div className="overlay-scrim">
             <div className="overlay-panel enter">
               <div className="display-sub stagger">ONRYO RING</div>
@@ -553,8 +559,11 @@ export function GameView() {
                 onOpen={openRoom}
                 onLeave={leaveRoom}
               />
-              <button type="button" className="ghost-btn stagger" onClick={() => setShopOpen(true)}>
+              <button type="button" className="ghost-btn stagger" onClick={() => { setGachaOpen(false); setShopOpen(true); }}>
                 式神強化
+              </button>
+              <button type="button" className="ghost-btn stagger" onClick={() => { setShopOpen(false); setGachaOpen(true); }}>
+                ガチャ
               </button>
               <button type="button" className="ghost-btn stagger" onClick={() => setCodexOpen(true)}>
                 図鑑
@@ -723,21 +732,27 @@ export function GameView() {
                   const left = g.itemT[it.id] ?? 0;
                   const on = left > 0;
                   const afford = g.coins >= it.price;
+                  const peek = g.itemTap !== "now" && slipPeek === it.id;
                   return (
                     <button
                       key={it.id}
                       type="button"
-                      className={`hud-slip${on ? " on" : ""}`}
-                      disabled={!on && !afford}
+                      className={`hud-slip${on ? " on" : ""}${peek ? " peek" : ""}`}
+                      disabled={g.itemTap === "now" && !on && !afford}
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.stopPropagation();
+                        if (g.itemTap !== "now" && slipPeek !== it.id) {
+                          setSlipPeek(it.id);
+                          return;
+                        }
                         if (seat === "guest") {
                           if (!linkedRef.current) return;
                           roomRef.current?.send({ t: "item", id: it.id, n: nextNonce() } satisfies NetMsg);
                         } else {
                           buyItem(g, it.id);
                         }
+                        setSlipPeek(null);
                         setTick((n) => n + 1);
                       }}
                     >
@@ -748,6 +763,11 @@ export function GameView() {
                 })}
               </div>
             )}
+            {g.itemListOpen && g.itemTap !== "now" && slipPeek && (
+              <p className="hud-slip-note">
+                {ITEMS.find((it) => it.id === slipPeek)?.blurb}　もう一度で使う
+              </p>
+            )}
             <button
               type="button"
               className={`hud-icon slips${g.itemListOpen || ITEMS.some((it) => (g.itemT[it.id] ?? 0) > 0) ? " on" : ""}`}
@@ -756,6 +776,7 @@ export function GameView() {
               onClick={(e) => {
                 e.stopPropagation();
                 g.itemListOpen = !g.itemListOpen;
+                if (!g.itemListOpen) setSlipPeek(null);
                 setTick((n) => n + 1);
               }}
             >
@@ -907,7 +928,7 @@ export function GameView() {
           />
         )}
         {codexOpen && g && <CodexPanel g={g} onClose={() => setCodexOpen(false)} />}
-        {roomHelp && seat === "host" && kind === "title" && !shopOpen && !settingsOpen && (
+        {roomHelp && seat === "host" && kind === "title" && !shopOpen && !gachaOpen && !settingsOpen && (
           <RoomOpened code={roomCode.slice(5)} onClose={() => setRoomHelp(false)} />
         )}
         {lesson && seat !== "guest" && !settingsOpen && kind !== "title" && kind !== "fail" && kind !== "clear" && kind !== "warn" && (
