@@ -1,5 +1,6 @@
 /*
-  タイトルから開く客神ガチャ。引くのはこの画面だけ。
+  タイトルのガチャ画面。中身と支払いは gacha.ts。
+  挑戦中には出さない。タイトルに引くボタンを戻すな。
 */
 import { useState } from "react";
 import { GACHA_COST, GACHA_MULTI_COST, GUEST_CARD_MAX, GUEST_CARDS, GUEST_KINDS, HEROES, guestGrowthOf, guestKind, guestSlipCost } from "./data";

@@ -1,3 +1,6 @@
+/*
+  効果音。当たり判定はしない。
+*/
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let sfx: GainNode | null = null;

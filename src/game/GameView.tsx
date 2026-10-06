@@ -1,3 +1,8 @@
+/*
+  画面の切り替えと HTML。盤面のルールは sim、絵は draw。
+  札と休止は左下の HTML。Canvas に戻すと重なる。
+  金皿の3択はここでは出さない。
+*/
 import { useEffect, useRef, useState } from "react";
 import { UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
@@ -139,6 +144,7 @@ export function GameView() {
       const raw = Math.min(0.1, (now - last) / 1000);
       last = now;
       acc += raw;
+      // 客は盤面を進めない。設定を開いているあいだも進めない。paused には落とさない。
       if (seatRef.current === "guest" || settingsOpenRef.current) {
         acc = 0;
       } else {

@@ -35,6 +35,7 @@ import {
   armCount,
   oiranPaceAt,
   emptyItemT,
+  guestCardMul,
   guestGrowthOf,
   SEIJAKU_MUL,
   SHIGURE_MUL,
@@ -59,7 +60,6 @@ import {
   bossHp,
   displayLevel,
   isMultiHit,
-  levelMul,
   makeWave,
   mulberry32,
   netaHpAt,
@@ -295,14 +295,14 @@ export function seedHero(g: Game, defId: HeroId, slot: number, buffMul = 1): Her
     targetY: BOSS_Y,
     buffMul,
     rank: 0,
-    reachMul: isGuest(defId) ? 1 + 0.05 * guestGrowthOf(g.guestGrowth, defId).reach : 1,
+    reachMul: isGuest(defId) ? guestCardMul("reach", guestGrowthOf(g.guestGrowth, defId).reach) : 1,
   };
 }
 
 function heroAtk(g: Game, h: Hero): number {
   const d = HEROES[h.defId];
-  let atk = (d.atk + g.shop.base) * levelMul(h.level) * g.atkMul * h.buffMul * g.screamMul;
-  if (isGuest(h.defId)) atk *= 1 + 0.08 * guestGrowthOf(g.guestGrowth, h.defId).blade;
+  let atk = (d.atk + g.shop.base) * displayLevel(h.level) * g.atkMul * h.buffMul * g.screamMul;
+  if (isGuest(h.defId)) atk *= guestCardMul("blade", guestGrowthOf(g.guestGrowth, h.defId).blade);
   if ((g.itemT.seijaku ?? 0) > 0) atk *= SEIJAKU_MUL;
   return atk;
 }
@@ -589,6 +589,7 @@ function pickBuffs(g: Game): WeaponOption[] {
 }
 
 function onGoldPlate(g: Game, b: Ball) {
+  // HTML の3択だけにするとプレビューで欠ける。mode が buff のあいだは進まない。
   g.shake = Math.min(1, g.shake + 0.28);
   burst(g, b.x, b.y, "#ffe28a", 16, "puff");
   float(g, b.x, b.y - 22, "金皿", "#ffe28a", 1.45);
@@ -625,6 +626,7 @@ function resolveHit(hp: number, amount: number): HitResult {
   return { applied, hp: next, dead: next <= 0 };
 }
 
+/** 戦闘の HP 減算は hurtBall と hurtBoss だけ。振りや弾から hp -= するな。 */
 export function hurtBall(g: Game, b: Ball, amount: number): HitResult | null {
   if (b.hp <= 0) return null;
   const hit = resolveHit(b.hp, amount);
@@ -1130,7 +1132,7 @@ function stepProjectiles(g: Game, dt: number) {
 function stepHeroes(g: Game, dt: number) {
   for (const h of g.slots) {
     if (!h) continue;
-    const step = isGuest(h.defId) ? 1 + 0.06 * guestGrowthOf(g.guestGrowth, h.defId).step : 1;
+    const step = isGuest(h.defId) ? guestCardMul("step", guestGrowthOf(g.guestGrowth, h.defId).step) : 1;
     h.prevSwing = h.swing;
     h.swing += (1.55 + h.attackT * 3.8) * liveSpd(g) * step * dt;
     h.attackT = Math.max(0, h.attackT - dt * (1.7 + liveSpd(g) * 1.1));
@@ -1191,6 +1193,7 @@ function rollSummon(g: Game): HeroId {
   return pool[0]!.id;
 }
 
+/** 召喚ボタンは無い。free は手毬を壊したときだけ。両を払って出す UI を戻すな。 */
 export function trySummon(g: Game, opts?: { free?: boolean }): boolean {
   if (g.mode !== "playing" && !g.demo) return false;
   const slot = firstEmpty(g);
@@ -1256,6 +1259,7 @@ function ensureOkikuPair(g: Game) {
   recomputePower(g);
 }
 
+/** 客神は合成しない。上がるのはレベルと武器の見た目。間隔と回転はレベルで伸ばさない。 */
 export function tryMergeOrSwap(g: Game, from: number, to: number): boolean {
   if (from === to) return false;
   const a = g.slots[from];
@@ -1438,7 +1442,7 @@ export function step(g: Game, dt: number) {
   refillStack(g, cap);
   layoutStack(g);
 
-  // 手毬は列に残す。タイマーで falling に落とすと「壊す＝召喚」が壊れる。
+  // 手毬は列に残す。dropCd で stack を falling に入れると「壊す＝召喚」が壊れる。
   for (let i = g.falling.length - 1; i >= 0; i--) {
     const b = g.falling[i]!;
     b.y += b.vy * dt;

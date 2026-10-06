@@ -1,6 +1,7 @@
 /*
   札を買った瞬間と、秒が切れた瞬間。
   効いているあいだの倍率は sim が itemT を読む。HP 減算は hurtBall だけ。
+  タイトルの店には置かない。Canvas には描かない。
 */
 import { ITEMS, slotXY } from "./data";
 import * as audio from "./audio";

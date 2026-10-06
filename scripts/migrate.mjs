@@ -9,6 +9,7 @@
  * The read is non-recursive, so the opt-in auth schema under migrations/auth/
  * is not applied to an app that never asked for sign-in.
  *
+ * 採用済みの番号は書き換えるな。番号の間に別名のファイルを足すな。
  * No DATABASE_URL (local / preview builds) -> skip; the PGLite fallback applies
  * the same files at startup instead (see src/lib/db.ts).
  */

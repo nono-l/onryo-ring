@@ -16,7 +16,7 @@ export const SLOT_R = 15;
 export const SWING_REACH = 1.34;
 export const STARTER_SLOT = 0;
 
-// 円の中に収まる同心円。真四角 6x6 だと縁が空き、角が円からはみ出す。
+// 同心円（1+8+12+16）。3x3 にも 6x6 の真四角にも戻すな。縁が空き、角が円からはみ出す。
 export const SLOT_LAYOUT: Array<{ x: number; y: number }> = (() => {
   const out: Array<{ x: number; y: number }> = [];
   const rings: Array<{ n: number; r: number; a0: number }> = [
@@ -53,10 +53,11 @@ export const WRAP_CAP = 18;
 export const WRAP_START = Math.PI * 1.18;
 export const WRAP_SPAN = Math.PI * 1.85;
 
-/** t=0 is ゴール (11 o'clock). t grows along the rim, away from the goal. */
+/** t=0 がゴール（11時）。t が増えると縁をゴールから離れて進む。0 をスタートにするとゴールが近くなる。 */
 export const GOAL_A = (Math.PI * 4) / 3;
 export const BELT_SPAN = Math.PI * 1.72;
 export const BELT_SLOTS = 20;
+/** 花魁の開始。下付近。ゴールを近い左下に戻すな。 */
 export const BELT_START = 0.48;
 /** 花魁の位置がこれ未満ならゴールが近い。0 がゴール。 */
 export const DANGER_TRACK = 0.14;
@@ -104,6 +105,7 @@ export function collabPose(t: number): { x: number; y: number; a: number } {
   };
 }
 
+/** 基礎攻撃は全部 1。上げるのは店の shop.base だけ。定数を上げるな。 */
 export const HEROES: Record<HeroId, HeroDef> = {
   okiku: {
     id: "okiku",
@@ -228,19 +230,17 @@ export const HEROES: Record<HeroId, HeroDef> = {
 
 export const CORE_HERO_IDS: HeroId[] = ["okiku", "mio", "kuro", "hakumen", "takaten"];
 
-export type GuestKind = { id: HeroId; cost: number; max: number; start: number };
+export type GuestKind = { id: HeroId; max: number; start: number };
 
-/** 客神のカタログ。cost は開始在庫からの最初の1体。以後は 3倍。紫苑は 2→8。モニカは 0 から、最初の1体が 300 華。 */
+/** 客神のカタログ。在庫の増え方は guestSlipCost。華の値段は持たない。 */
 export const GUEST_KINDS: GuestKind[] = [
-  { id: "shion", cost: 300, max: 8, start: 2 },
-  { id: "monika", cost: 300, max: 8, start: 0 },
+  { id: "shion", max: 8, start: 2 },
+  { id: "monika", max: 8, start: 0 },
 ];
 
 export const GUEST_ID: HeroId = GUEST_KINDS[0]!.id;
-/** 右上の列。華が先、その下に客神。 */
+/** 右上の華の当たり。客神一覧は HTML。Canvas に客神の当たりを戻すとボタンと重なる。 */
 export const MARK_BADGE = { x: 306, y: 48, w: 76, h: 40 };
-export const GUEST_TRAY = { x: 306, y: 94, w: 76, h: 90 };
-export const GUEST_TRAY_GAP = 6;
 export const GUEST_CARD = { x: 10, y: 54, w: 288, h: 124 };
 export const GUEST_HINT = "空いているマスを選ぶ";
 
@@ -311,23 +311,6 @@ export function hitMarkBadge(x: number, y: number): boolean {
   return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
 
-export function guestTrayRect(i: number): { x: number; y: number; w: number; h: number } {
-  return {
-    x: GUEST_TRAY.x,
-    y: GUEST_TRAY.y + i * (GUEST_TRAY.h + GUEST_TRAY_GAP),
-    w: GUEST_TRAY.w,
-    h: GUEST_TRAY.h,
-  };
-}
-
-export function hitGuestKind(x: number, y: number): HeroId | null {
-  for (let i = 0; i < GUEST_KINDS.length; i++) {
-    const r = guestTrayRect(i);
-    if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return GUEST_KINDS[i]!.id;
-  }
-  return null;
-}
-
 export function roleLabel(role: Role): string {
   return role === "melee" ? "近接" : "遠距離";
 }
@@ -359,7 +342,7 @@ export function buffCardRect(i: number): { x: number; y: number; w: number; h: n
   };
 }
 
-/** World length of the drawn weapon. drawWeapon の rotate(+Y) と同じ向き。cos/sin で先端を取ると90度ずれる。 */
+/** 描画と当たりで共有する武器の長さ。drawWeapon の rotate(+Y) と同じ向き。cos/sin で先端を取ると90度ずれる。 */
 export function swingLen(h: { defId: HeroId; level: number; reachMul?: number }): number {
   const hs = (SLOT_R / 27) * SWING_REACH;
   const s = 0.92 + h.level * 0.18;
@@ -415,8 +398,7 @@ export const GOLD_FAST_KILLS = 4;
 export const GOLD_EARLY_EVERY = 4;
 export const GOLD_LATE_NORMAL = 10;
 
-// レーン上の皿は出たときの HP のまま。ここはこれから出す皿だけ。
-// 3個倍は最初の2回（撃破 3/6）。そのあと 1 個ごと。wave は掛けない。
+// 新しく出す皿だけ。レーン上の皿の HP は出たときのまま。開始は 1。wave は掛けない。
 export function netaHpAt(goldKills: number): number {
   const k = Math.max(0, goldKills);
   const earlyTimes = 2;
@@ -434,7 +416,7 @@ export function summonCostAt(count: number): number {
   return Math.min(40, 10 + count * 2);
 }
 
-/** Same counter as summon cost: n=0..2 → 2, then 6, 9/18, 15/35… */
+/** 召喚コストと同じ回数。分けると手毬の硬さと両の増え方がずれる。 */
 export function temariHpAt(count: number, rng: () => number, wave = 1, thin = 0): number {
   let mul: number;
   if (count <= 2) mul = 1;
@@ -469,6 +451,7 @@ export function makeWave(
   return out;
 }
 
+/** 199 や 999 に戻すな。wave ごとに 1.38 倍。 */
 export function bossHp(wave: number): number {
   return Math.round(9999 * Math.pow(1.38, wave - 1));
 }
@@ -477,11 +460,7 @@ export function dropInterval(wave: number): number {
   return Math.max(3.0, 5.2 - wave * 0.16);
 }
 
-export function levelMul(level: number): number {
-  return 2 * level - 1;
-}
-
-/** 3-merge display: Lv1→1, Lv2→3, Lv3→5 */
+/** 表示レベルと攻撃倍率は同じ奇数。分けるとレベル1が1でなくなる。 */
 export function displayLevel(level: number): number {
   return 2 * level - 1;
 }
@@ -562,6 +541,22 @@ export const ITEM_TAP_KEY = "onryo-ring-item-tap";
 export const GACHA_COST = 100;
 export const GACHA_MULTI = 11;
 export const GACHA_MULTI_COST = 1000;
+/** 刃・足・縁。この値未満。3枚で等分するので、幅を別の数に書かない。 */
+export const GACHA_UPGRADE_P = 0.24;
+/** 客神札。この値未満。 */
+export const GACHA_SLIP_P = 0.6;
+/** 端両。この値未満。 */
+export const GACHA_COIN_P = 0.78;
+/** 花びら。この値未満。残りは封。 */
+export const GACHA_MARK_P = 0.9;
+export const GACHA_COIN_MISS = 40;
+export const GACHA_MARK_MISS = 8;
+/** 段ごとの倍率。sim に散らすとガチャの説明と戦闘がずれる。 */
+export const GUEST_CARD_STEP: Record<GuestCardId, number> = { blade: 0.08, step: 0.06, reach: 0.05 };
+
+export function guestCardMul(card: GuestCardId, level: number): number {
+  return 1 + GUEST_CARD_STEP[card] * Math.max(0, level);
+}
 export const GUEST_CARD_MAX = 5;
 export const GUEST_CARDS: Array<{ id: GuestCardId; name: string; blurb: string }> = [
   { id: "blade", name: "刃", blurb: "攻撃" },
@@ -837,12 +832,14 @@ export const SHOP_T2_ITEMS: Array<{ id: ShopId; name: string; desc: string }> = 
   { id: "base", name: "基礎攻撃力", desc: "式神の基礎攻撃 1 を上げる。値段は急に跳ねる" },
 ];
 
+/** 金運の底は置かない。金皿の金運とは別。 */
 export const SHOP_T3_ITEMS: Array<{ id: ShopId; name: string; desc: string }> = [
   { id: "seed", name: "口寄せの種", desc: "最初から、手毬1つにつき式神がもう出る" },
   { id: "back", name: "押し戻し", desc: "寿司を倒したときの花魁バックが増える" },
   { id: "arms", name: "輪刃", desc: "振り回す武器が増える。円に等間隔" },
 ];
 
+/** 回収は置かない。 */
 export const SHOP_T4_ITEMS: Array<{ id: ShopId; name: string; desc: string }> = [
   { id: "slow", name: "足枷", desc: "花魁の歩みが遅くなる" },
   { id: "thin", name: "薄皮", desc: "手毬の耐久が下がる。召喚しやすくなる" },

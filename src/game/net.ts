@@ -1,3 +1,8 @@
+/*
+  部屋の電文。盤面を進めるのは主催の sim。客は step しない。
+  客の在庫と、ドラッグ中の客神は上書きしない。休止と武器選びは主催だけ。
+  札の効果は主催の buyItem だけ。ack の id を変えるな。
+*/
 import { GUEST_KINDS, isGuest, ITEMS } from "./data";
 import { moveOwnedGuest, placeGuestFromPeer } from "./guests";
 import { buyItem } from "./items";

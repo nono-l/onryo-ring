@@ -1,17 +1,14 @@
 /*
   Canvas 描画。金皿3択は HTML overlay にしない。このプレビューでは欠ける。
   先端の向きは data.swingTip と drawWeapon の rotate(+Y) を一致させる。
+  華と客神一覧は HTML。Canvas に描くとボタンと重なる。
 */
 import {
   BALL_R,
   BELT_SPAN,
   DANGER_TRACK,
   GOAL_A,
-  GUEST_CARD,
-  GUEST_HINT,
   GUEST_KINDS,
-  guestTrayRect,
-  MARK_BADGE,
   isGuest,
   roleLabel,
   HEROES,
@@ -924,6 +921,7 @@ function drawHitboxes(ctx: CanvasRenderingContext2D, g: Game) {
 }
 
 function drawBuffMenu(ctx: CanvasRenderingContext2D, g: Game) {
+  // React の overlay に移すな。このプレビューでは欠ける。
   ctx.save();
   ctx.fillStyle = "rgba(12, 8, 6, 0.72)";
   ctx.fillRect(0, 0, VW, VH);
@@ -950,152 +948,6 @@ function drawBuffMenu(ctx: CanvasRenderingContext2D, g: Game) {
     ctx.fillStyle = "#f0e6d4";
     ctx.fillText(o.desc, r.x + r.w / 2, r.y + 58);
   }
-  ctx.restore();
-}
-
-function drawFlower(ctx: CanvasRenderingContext2D, x: number, y: number, r: number) {
-  ctx.save();
-  ctx.translate(x, y);
-  for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
-    ctx.beginPath();
-    ctx.ellipse(Math.cos(a) * r * 0.42, Math.sin(a) * r * 0.42, r * 0.36, r * 0.48, a, 0, Math.PI * 2);
-    ctx.fillStyle = i % 2 ? "#f0d4ff" : "#c48ae0";
-    ctx.fill();
-  }
-  ctx.beginPath();
-  ctx.arc(0, 0, r * 0.28, 0, Math.PI * 2);
-  ctx.fillStyle = "#fff4c8";
-  ctx.fill();
-  ctx.restore();
-}
-
-function drawMarkBadge(ctx: CanvasRenderingContext2D, g: Game) {
-  const r = MARK_BADGE;
-  ctx.save();
-  ctx.beginPath();
-  ctx.roundRect(r.x, r.y, r.w, r.h, 12);
-  ctx.fillStyle = "rgba(36,22,48,0.92)";
-  ctx.fill();
-  ctx.strokeStyle = "#e0b8ff";
-  ctx.lineWidth = 1.6;
-  ctx.stroke();
-  drawFlower(ctx, r.x + 18, r.y + r.h / 2, 9);
-  ctx.textAlign = "right";
-  ctx.textBaseline = "middle";
-  ctx.font = '800 16px "Zen Kaku Gothic New", sans-serif';
-  ctx.fillStyle = "#f4e8ff";
-  ctx.fillText(String(g.marks), r.x + r.w - 10, r.y + r.h / 2 + 1);
-  ctx.restore();
-}
-
-function drawGuestTray(ctx: CanvasRenderingContext2D, g: Game) {
-  for (let i = 0; i < GUEST_KINDS.length; i++) {
-    const kind = GUEST_KINDS[i]!;
-    const r = guestTrayRect(i);
-    const left = g.guestLeft[kind.id] ?? 0;
-    const ready = left > 0;
-    const pick = g.guestPick === kind.id;
-    const name = HEROES[kind.id].name;
-    ctx.save();
-    ctx.shadowColor = pick ? "rgba(232,200,255,0.85)" : "rgba(180,120,220,0.55)";
-    ctx.shadowBlur = pick ? 16 : 10;
-    ctx.beginPath();
-    ctx.roundRect(r.x, r.y, r.w, r.h, 12);
-    ctx.fillStyle = pick ? "rgba(72,40,96,0.96)" : "rgba(36,22,48,0.92)";
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = pick ? "#f0dcff" : ready ? "#e0b8ff" : "rgba(180,160,190,0.55)";
-    ctx.lineWidth = pick ? 2.4 : 1.8;
-    ctx.stroke();
-
-    const img = SPRITES[kind.id];
-    const cx = r.x + r.w / 2;
-    if (img && img.complete && img.naturalWidth) {
-      ctx.save();
-      ctx.globalAlpha = ready ? 1 : 0.4;
-      ctx.drawImage(img, cx - 24, r.y + 8, 48, 48);
-      ctx.restore();
-    } else {
-      ctx.fillStyle = ready ? "#c89ae8" : "#5a4a62";
-      ctx.beginPath();
-      ctx.arc(cx, r.y + 32, 18, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.font = '700 11px "Zen Kaku Gothic New", sans-serif';
-    ctx.fillStyle = pick ? "#fff6ff" : "#f0d8ff";
-    ctx.fillText(pick ? "マスへ" : name, cx, r.y + r.h - 14);
-    outlined(ctx, String(left), r.x + r.w - 12, r.y + 14, ready ? "#fff" : "#b0a0b8", 14);
-    ctx.restore();
-  }
-}
-
-function drawGuestCard(ctx: CanvasRenderingContext2D, g: Game) {
-  const id = g.guestPick;
-  if (!id) return;
-  const r = GUEST_CARD;
-  const d = HEROES[id];
-  const atk = d.atk + g.shop.base;
-  ctx.save();
-  ctx.shadowColor = "rgba(200,150,240,0.55)";
-  ctx.shadowBlur = 14;
-  ctx.beginPath();
-  ctx.roundRect(r.x, r.y, r.w, r.h, 14);
-  ctx.fillStyle = "rgba(28,16,38,0.94)";
-  ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = "#e0b8ff";
-  ctx.lineWidth = 1.6;
-  ctx.stroke();
-
-  const img = SPRITES[id];
-  const px = r.x + 10;
-  const py = r.y + 10;
-  const ps = 72;
-  if (img && img.complete && img.naturalWidth) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(px, py, ps, ps, 10);
-    ctx.clip();
-    ctx.drawImage(img, px, py, ps, ps);
-    ctx.restore();
-    ctx.beginPath();
-    ctx.roundRect(px, py, ps, ps, 10);
-    ctx.strokeStyle = "rgba(232,200,255,0.7)";
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
-  } else {
-    ctx.fillStyle = d.color;
-    ctx.beginPath();
-    ctx.arc(px + ps / 2, py + ps / 2, 28, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  const tx = px + ps + 12;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.font = '800 20px "Shippori Mincho", serif';
-  ctx.fillStyle = "#f4e8ff";
-  ctx.fillText(d.name, tx, r.y + 22);
-  ctx.font = '700 11px "Zen Kaku Gothic New", sans-serif';
-  ctx.fillStyle = "#e8c15a";
-  ctx.fillText(`${d.title}　${roleLabel(d.role)}`, tx, r.y + 42);
-  ctx.fillStyle = "#d8c8e8";
-  ctx.fillText(d.weapon, tx, r.y + 58);
-  ctx.fillStyle = "#f0e6d4";
-  ctx.font = '700 10px "Zen Kaku Gothic New", sans-serif';
-  ctx.fillText(`攻撃 ${atk}　間隔 ${d.interval.toFixed(2)}秒`, tx, r.y + 74);
-  ctx.fillText(`射程 ${d.range}`, tx, r.y + 88);
-
-  ctx.font = '700 10px "Zen Kaku Gothic New", sans-serif';
-  ctx.fillStyle = "rgba(232,212,248,0.92)";
-  ctx.fillText(d.blurb, r.x + 12, r.y + r.h - 28);
-  const pulse = 0.72 + Math.sin(g.t * 5) * 0.28;
-  ctx.fillStyle = `rgba(232,193,90,${pulse.toFixed(3)})`;
-  ctx.fillText(GUEST_HINT, r.x + 12, r.y + r.h - 12);
   ctx.restore();
 }
 
@@ -1145,6 +997,7 @@ function drawHud(ctx: CanvasRenderingContext2D, g: Game) {
 }
 
 function drawOiranDanger(ctx: CanvasRenderingContext2D, g: Game) {
+  // タイトルの見本では出さない。負け条件そのものは変えない。
   const heat = oiranDanger(g.boss.track);
   if (heat <= 0) return;
   if (g.mode !== "playing" && g.mode !== "paused" && g.mode !== "warn") return;

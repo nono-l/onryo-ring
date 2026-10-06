@@ -1,3 +1,7 @@
+/*
+  叫びの倍率。攻撃へ掛けるのは sim の screamMul。
+  マイクが拒否されても戦闘は続ける。
+*/
 const FLOOR = 0.018;
 const CEIL = 0.22;
 const VOL_MAX = 3;

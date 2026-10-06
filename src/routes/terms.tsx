@@ -1,3 +1,6 @@
+/*
+  配信の許諾。条件はタイトルを付けることだけ。長い契約に戻すな。
+*/
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { articleDateHead } from "@/lib/page-date";
 import { PAGE_DATES } from "@/lib/page-dates.generated";

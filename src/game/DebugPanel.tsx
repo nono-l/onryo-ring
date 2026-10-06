@@ -1,3 +1,7 @@
+/*
+  設定とデバッグ。戦闘のルールは持たない。
+  タイトルの設定から誰でもON。右上のトグルに戻すな。
+*/
 import { useEffect, useRef, useState } from "react";
 import type { Game, HeroId } from "./types";
 import type { DebugField } from "./sim";

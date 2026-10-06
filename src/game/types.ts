@@ -1,3 +1,7 @@
+/*
+  盤面の形。数値と配置は data.ts。判定は sim.ts。
+  ここに HP や倍率を書かない。
+*/
 export type HeroId = "okiku" | "mio" | "kuro" | "hakumen" | "takaten" | "shion" | "monika";
 export type ItemId =
   | "senko"
@@ -40,10 +44,10 @@ export interface HeroDef {
   range: number;
   color: string;
   projectile: string;
-  /** 図鑑の武器名 */
+  /** 図鑑に出す武器の名前。攻撃の数値とは別。 */
   weapon: string;
   blurb: string;
-  /** 武器の長さ。L = reachBase + level * reachPer。その後に振りの倍率を掛ける。 */
+  /** 届く長さの底。計算は swingLen だけ。defId で射程を足すな。 */
   reachBase: number;
   reachPer: number;
   /** 先端の半径。tipBase + level */

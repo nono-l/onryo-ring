@@ -7,7 +7,7 @@ import { chooseBuff, chooseWeapon } from "./picks.ts";
 import { createGame } from "./sim.ts";
 import type { HeroId } from "./types.ts";
 
-/** 編集前の届く長さ。HEROES の数値を写さず、ここを正にする。 */
+/** 届く長さ、客神は合成しない、札の両、武器と金皿の倍率。数値を動かす前にこのテストを落とすな。 */
 const REACH: Record<HeroId, { base: number; per: number; tip: number }> = {
   okiku: { base: 47, per: 0, tip: 8 },
   mio: { base: 33, per: 3, tip: 5 },

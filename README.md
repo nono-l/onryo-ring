@@ -25,6 +25,6 @@ npm run dev
 | `draw.ts` | Canvas 描画。金皿3択もここ |
 | `GameView.tsx` | タイトル等の HTML オーバーレイと入力 |
 
-次の人が触る前に **[SESSION.md](SESSION.md)** を読む。罠と「やってはいけないこと」が書いてある。
+次の人が触る前に **[SESSION.md](SESSION.md)** を読む。コーディング方針、コメント方針、やってはいけないことが、このリポジトリの中だけに書いてある。
 
 配信・切り抜きの許可は **[TERMS.md](TERMS.md)**（アプリ内 `/terms`）。条件はタイトルを付けることだけ。
