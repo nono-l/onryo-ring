@@ -2,37 +2,47 @@ import { useEffect, useRef, useState } from "react";
 import { UserButton } from "@/lib/auth/gates";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
 import { loadCloudSave, putCloudSave } from "@/server/saves";
-import { GUEST_HINT, GUEST_KINDS, HEROES, ITEMS, guestCost, guestLine, SHOP_ITEMS, SHOP_T2_ITEMS, SHOP_T3_ITEMS, SHOP_T4_ITEMS, SHOP_T3_SPEND, SHOP_T4_SPEND, VH, VW, shopCost, shopMax, shopT1Maxed, shopT2Spent, shopT3Open, shopT3Spent, shopT4Open, shopValue } from "./data";
+import { GUEST_HINT, GUEST_KINDS, HEROES, guestLine, VH, VW, shopT1Maxed, shopT3Open, shopT4Open, hitMarkBadge, isGuest, ITEMS } from "./data";
 import { BUILD_STAMP } from "./build-stamp";
-import { CodexPanel, DebugDock, HeroCard, SettingsPanel } from "./DebugPanel";
+import { DebugDock, HeroCard, SettingsPanel } from "./DebugPanel";
 import { draw, loadAssets } from "./draw";
 import {
   applyMeta,
-  buyGuest,
-  buyItem,
-  buyShop,
-  chooseRoute,
-  chooseWeapon,
+  cashOutRun,
+  continueClear,
   createGame,
-  debugNudge,
-  mergeMeta,
-  nudgeGuest,
-  onPointerDown,
-  onPointerMove,
-  onPointerUp,
   resetRun,
-  setCloudFlush,
   setMode,
-  setPlayStyle,
-  snapshotMeta,
+  startLesson,
   step,
 } from "./sim";
-import type { Game, HeroId, ShopId } from "./types";
-import type { DebugField } from "./sim";
+import { buyItem } from "./items";
+import { onPointerDown, onPointerMove, onPointerUp, slotAt } from "./input";
+import { chooseRoute, chooseWeapon } from "./picks";
+import { dismissTutorial, mergeMeta, setCloudFlush, setPlayStyle, setTutorialShow, snapshotMeta, tutorialShowMode, tutorialShowsOnStart, type TutorialMode } from "./persist";
+import { armGuestLeft, moveOwnedGuest, refundOwnGuest, spendOwnGuest } from "./guests";
+import type { Game, GuestStock, HeroId, LessonStep } from "./types";
 import * as audio from "./audio";
 import { startVoice } from "./mic";
+import { P2PRoom, type PeerInfo } from "@/lib/multiplayer";
+import { applySnap, hostOnMessage, isNetMsg, packSnap, type NetMsg } from "./net";
+import { GuestBar, GuestWait, RoomBox, RoomChip, RoomOpened } from "./room-ui";
+import { CodexPanel, ShopPanel } from "./shop-ui";
+import { ClearOverlay, DangerWarn, FailOverlay, LessonBar, PauseButton, PauseOverlay, RouteOverlay, WeaponOverlay } from "./match-ui";
 
-type OverlayKind = "title" | "none" | "weapon" | "route" | "buff" | "fail" | "paused";
+type OverlayKind = "title" | "none" | "weapon" | "route" | "buff" | "fail" | "paused" | "clear" | "warn";
+type Seat = "off" | "host" | "guest";
+
+function roomCodeOk(code: string): boolean {
+  return /^ring-[A-Z2-9]{4}$/.test(code);
+}
+
+function makeRoomCode(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let tail = "";
+  for (let i = 0; i < 4; i++) tail += alphabet[(Math.random() * alphabet.length) | 0];
+  return `ring-${tail}`;
+}
 
 export function GameView() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -43,18 +53,43 @@ export function GameView() {
   const [ready, setReady] = useState(false);
   const [muted, setMuted] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
-  const [shopTab, setShopTab] = useState<"base" | "guest" | "item">("base");
+  const [shopTab, setShopTab] = useState<"base" | "guest">("base");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsOpenRef = useRef(false);
   settingsOpenRef.current = settingsOpen;
+  const [lesson, setLesson] = useState<LessonStep | null>(null);
+  const [tutorialOn, setTutorialOn] = useState(false);
+  const [tutorialMode, setTutorialMode] = useState<TutorialMode>("once");
   const [codexOpen, setCodexOpen] = useState(false);
-  const [guestOpen, setGuestOpen] = useState(false);
   const [failManual, setFailManual] = useState(false);
+  const [seat, setSeat] = useState<Seat>("off");
+  const [roomCode, setRoomCode] = useState("");
+  const [joinDraft, setJoinDraft] = useState("");
+  const [peers, setPeers] = useState<PeerInfo[]>([]);
+  const [roomNote, setRoomNote] = useState("");
+  const [linked, setLinked] = useState(false);
+  const [roomHelp, setRoomHelp] = useState(false);
+  const linkedRef = useRef(false);
+  const seatRef = useRef<Seat>("off");
+  seatRef.current = seat;
+  const roomRef = useRef<P2PRoom | null>(null);
+  const peerStockRef = useRef(new Map<string, GuestStock>());
+  const pendingPlaceRef = useRef(new Map<number, HeroId>());
+  const pendingMoveRef = useRef<{ n: number; heroId: number; to: number; at: number } | null>(null);
+  const guestDragHeroRef = useRef<number | null>(null);
+  const nonceRef = useRef(1);
+  const selfIdRef = useRef(`p${Math.random().toString(36).slice(2, 10)}`);
   const { user, isPending } = useCurrentUserState();
 
   useEffect(() => {
     if (kind !== "fail") setFailManual(false);
   }, [kind]);
+
+  useEffect(() => {
+    const mode = tutorialShowMode();
+    setTutorialMode(mode);
+    setTutorialOn(mode !== "off");
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,17 +122,21 @@ export function GameView() {
 
     let last = performance.now();
     let acc = 0;
+    let sendAcc = 0;
+    let helloAcc = 0;
     let raf = 0;
     let lastKind: OverlayKind = "title";
     let lastMarks = game.marks;
     let lastGuests = guestLine(game.guestLeft);
     const STEP = 1 / 60;
 
+    let prevLesson: LessonStep | null = game.lesson;
+    let slipAcc = 0;
     const loop = (now: number) => {
       const raw = Math.min(0.1, (now - last) / 1000);
       last = now;
       acc += raw;
-      if (settingsOpenRef.current) {
+      if (seatRef.current === "guest" || settingsOpenRef.current) {
         acc = 0;
       } else {
         while (acc >= STEP) {
@@ -105,7 +144,38 @@ export function GameView() {
           acc -= STEP;
         }
       }
+      const room = roomRef.current;
+      game.assist = seatRef.current === "guest";
+      if (room && seatRef.current === "host") {
+        sendAcc += raw;
+        if (sendAcc >= 0.12) {
+          sendAcc = 0;
+          try {
+            room.broadcast({ t: "snap", snap: packSnap(game) });
+          } catch {
+            /* 客の受信が追いつかない間は次の写しで足りる */
+          }
+        }
+      }
+      if (room && seatRef.current === "guest" && !linkedRef.current) {
+        helloAcc += raw;
+        if (helloAcc >= 0.35) {
+          helloAcc = 0;
+          room.send({ t: "hello", stock: { ...game.guestStock } } satisfies NetMsg);
+        }
+      }
       draw(ctx, game);
+      if (game.lesson !== prevLesson) {
+        const finished = prevLesson != null && game.lesson == null;
+        prevLesson = game.lesson;
+        setLesson(game.lesson);
+        if (finished) {
+          dismissTutorial();
+          const mode = tutorialShowMode();
+          setTutorialMode(mode);
+          setTutorialOn(mode !== "off");
+        }
+      }
       const k = overlayOf(game);
       if (k !== lastKind) {
         lastKind = k;
@@ -116,11 +186,21 @@ export function GameView() {
         lastGuests = guestLine(game.guestLeft);
         setTick((n) => n + 1);
       }
+      slipAcc += raw;
+      if (slipAcc >= 0.25) {
+        slipAcc = 0;
+        let hot = false;
+        for (const t of Object.values(game.itemT)) {
+          if (t > 0) hot = true;
+        }
+        if (hot) setTick((n) => n + 1);
+      }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
 
     const onVis = () => {
+      if (seatRef.current === "guest") return;
       if (document.visibilityState === "hidden") {
         if (game.mode === "playing") {
           setMode(game, "paused");
@@ -131,6 +211,7 @@ export function GameView() {
       }
     };
     const onKey = (e: KeyboardEvent) => {
+      if (seatRef.current === "guest") return;
       if (e.key === "Escape" && game.mode === "playing") {
         setMode(game, "paused");
         setKind("paused");
@@ -162,7 +243,7 @@ export function GameView() {
           applyMeta(g, mergeMeta(snapshotMeta(g), { version: 2, ...remote }));
         }
         setCloudFlush((m) => {
-          void putCloudSave({ data: { highWave: m.highWave, bank: m.bank, markBank: m.markBank, guestStock: m.guestStock, itemStock: m.itemStock, shop: m.shop } }).catch(
+          void putCloudSave({ data: { highWave: m.highWave, bank: m.bank, markBank: m.markBank, guestStock: m.guestStock, shop: m.shop } }).catch(
             () => {},
           );
         });
@@ -194,10 +275,15 @@ export function GameView() {
     const g = gameRef.current;
     if (!g) return;
     audio.unlockAudio();
-    if (g.voiceOn) void startVoice();
+    if (g.voiceOn && seatRef.current !== "guest") void startVoice();
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     const p = toLocal(e);
+    if (seatRef.current === "guest") {
+      guestDown(g, p.x, p.y);
+      setTick((n) => n + 1);
+      return;
+    }
     const picking = g.guestPick;
     if (g.mode === "playing" || g.mode === "buff") onPointerDown(g, p.x, p.y);
     if (g.guestPick !== picking) setTick((n) => n + 1);
@@ -206,13 +292,69 @@ export function GameView() {
     const g = gameRef.current;
     if (!g) return;
     const p = toLocal(e);
+    if (seatRef.current === "guest") {
+      if (g.drag) onPointerMove(g, p.x, p.y);
+      return;
+    }
     onPointerMove(g, p.x, p.y);
   };
   const onUp = (e: React.PointerEvent) => {
     const g = gameRef.current;
     if (!g) return;
     const p = toLocal(e);
+    if (seatRef.current === "guest") {
+      guestUp(g, p.x, p.y);
+      return;
+    }
     onPointerUp(g, p.x, p.y);
+  };
+
+  const nextNonce = () => {
+    nonceRef.current += 1;
+    return nonceRef.current;
+  };
+
+  const guestDown = (g: Game, x: number, y: number) => {
+    if (g.mode !== "playing") return;
+    if (hitMarkBadge(x, y)) {
+      g.guestListOpen = !g.guestListOpen;
+      if (!g.guestListOpen) g.guestPick = null;
+      return;
+    }
+    if (g.guestPick) {
+      const id = g.guestPick;
+      const s = slotAt(x, y);
+      g.guestPick = null;
+      g.guestListOpen = false;
+      if (s < 0 || g.slots[s]) return;
+      if (!linkedRef.current) return;
+      if (!spendOwnGuest(g, id)) return;
+      const n = nextNonce();
+      pendingPlaceRef.current.set(n, id);
+      roomRef.current?.send({ t: "place", id, slot: s, n } satisfies NetMsg);
+      return;
+    }
+    const s = slotAt(x, y);
+    const hero = s >= 0 ? g.slots[s] : null;
+    if (hero && isGuest(hero.defId) && hero.owner === selfIdRef.current) {
+      g.drag = { slot: s, x, y };
+      g.selectedSlot = s;
+      guestDragHeroRef.current = hero.id;
+    }
+  };
+
+  const guestUp = (g: Game, x: number, y: number) => {
+    if (!g.drag) return;
+    const from = g.drag.slot;
+    const heroId = guestDragHeroRef.current;
+    g.drag = null;
+    guestDragHeroRef.current = null;
+    const to = slotAt(x, y);
+    if (heroId == null || to < 0 || to === from || !linkedRef.current) return;
+    if (!moveOwnedGuest(g, from, to, selfIdRef.current)) return;
+    const n = nextNonce();
+    pendingMoveRef.current = { n, heroId, to, at: performance.now() };
+    roomRef.current?.send({ t: "move", from, to, n } satisfies NetMsg);
   };
 
   const toggleMute = () => {
@@ -223,16 +365,143 @@ export function GameView() {
     setMuted(g.muted);
   };
 
-  const start = () => {
+  const openRun = (forceLesson: boolean) => {
     const g = gameRef.current;
-    if (!g || !ready) return;
+    if (!g || !ready || seatRef.current === "guest") return;
     audio.unlockAudio();
     if (g.voiceOn) void startVoice();
     resetRun(g, false);
     setShopOpen(false);
     setSettingsOpen(false);
+    setRoomHelp(false);
     setKind("none");
+    if (forceLesson || tutorialShowsOnStart()) {
+      startLesson(g);
+      setLesson("move");
+    } else {
+      setLesson(null);
+    }
   };
+
+  const start = () => openRun(false);
+
+  const skipLesson = () => {
+    const g = gameRef.current;
+    if (g) g.lesson = null;
+    setLesson(null);
+    dismissTutorial();
+    const mode = tutorialShowMode();
+    setTutorialMode(mode);
+    setTutorialOn(mode !== "off");
+  };
+
+  const openRoom = () => {
+    peerStockRef.current.clear();
+    setRoomNote("");
+    setRoomCode(makeRoomCode());
+    setSeat("host");
+    setRoomHelp(true);
+  };
+
+  const joinRoom = () => {
+    const code = joinDraft.trim().toUpperCase();
+    const room = code.startsWith("RING-") ? `ring-${code.slice(5)}` : code.startsWith("ring-") ? code : `ring-${code}`;
+    if (!roomCodeOk(room)) {
+      setRoomNote("合い言葉は4文字です");
+      return;
+    }
+    const g = gameRef.current;
+    if (g) armGuestLeft(g);
+    peerStockRef.current.clear();
+    pendingPlaceRef.current.clear();
+    pendingMoveRef.current = null;
+    guestDragHeroRef.current = null;
+    setRoomNote("");
+    setRoomCode(room);
+    setSeat("guest");
+  };
+
+  const leaveRoom = () => {
+    setSeat("off");
+    setRoomCode("");
+    setRoomHelp(false);
+    setPeers([]);
+    setRoomNote("");
+    peerStockRef.current.clear();
+    pendingPlaceRef.current.clear();
+    pendingMoveRef.current = null;
+    guestDragHeroRef.current = null;
+    linkedRef.current = false;
+    setLinked(false);
+  };
+
+  useEffect(() => {
+    if (seat === "off" || !roomCode) return;
+    linkedRef.current = false;
+    setLinked(false);
+    const room = new P2PRoom({
+      room: roomCode,
+      selfId: selfIdRef.current,
+      name: seat === "host" ? "主催" : "客",
+      onPeersChanged: (list) => {
+        setPeers(list);
+        const g = gameRef.current;
+        if (!g) return;
+        if (seatRef.current === "guest" && list.some((p) => p.connectionState === "connected")) {
+          room.send({ t: "hello", stock: { ...g.guestStock } } satisfies NetMsg);
+        }
+        if (seatRef.current === "host") {
+          room.send({ t: "snap", snap: packSnap(g) } satisfies NetMsg);
+        }
+      },
+      onMessage: (from, data, channel) => {
+        const g = gameRef.current;
+        if (!g || !isNetMsg(data)) return;
+        if (seatRef.current === "host") {
+          if (channel !== "reliable") return;
+          hostOnMessage(g, from, data, peerStockRef.current, (msg, to) => room.send(msg, to));
+          setTick((n) => n + 1);
+          return;
+        }
+        if (data.t === "snap") {
+          applySnap(g, data.snap, guestDragHeroRef.current ?? undefined);
+          const pend = pendingMoveRef.current;
+          if (pend) {
+            const at = g.slots.findIndex((h) => h?.id === pend.heroId);
+            if (at < 0 || at === pend.to || performance.now() - pend.at > 1500) pendingMoveRef.current = null;
+            else moveOwnedGuest(g, at, pend.to, selfIdRef.current);
+          }
+          setTick((n) => n + 1);
+          return;
+        }
+        if (data.t === "welcome") {
+          if (!linkedRef.current) {
+            linkedRef.current = true;
+            setLinked(true);
+          }
+          return;
+        }
+        if (data.t === "ack") {
+          const id = pendingPlaceRef.current.get(data.n);
+          pendingPlaceRef.current.delete(data.n);
+          if (id && !data.ok) refundOwnGuest(g, id);
+          if (pendingMoveRef.current?.n === data.n && !data.ok) pendingMoveRef.current = null;
+          setTick((n) => n + 1);
+        }
+      },
+    });
+    roomRef.current = room;
+    void room.join().then(() => {
+      if (seatRef.current === "guest") {
+        const g = gameRef.current;
+        if (g) room.send({ t: "hello", stock: { ...g.guestStock } } satisfies NetMsg);
+      }
+    });
+    return () => {
+      room.close();
+      if (roomRef.current === room) roomRef.current = null;
+    };
+  }, [seat, roomCode]);
 
   const g = gameRef.current;
   const showPlayHud = (kind === "none" || kind === "paused") && !settingsOpen;
@@ -253,150 +522,37 @@ export function GameView() {
         {(kind === "title" || kind === "fail") && (
           <AuthSlot isPending={isPending} signedIn={!!user} />
         )}
-        {kind === "title" && shopOpen && g && (
-          <div className="overlay-scrim is-shop">
-            <div className="overlay-panel enter shop-panel">
-              <div className="shop-head">
-                <div className="shop-tabs three" role="tablist">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={shopTab === "base"}
-                    className={shopTab === "base" ? "on" : ""}
-                    onClick={() => setShopTab("base")}
-                  >
-                    基礎強化
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={shopTab === "guest"}
-                    className={shopTab === "guest" ? "on" : ""}
-                    onClick={() => setShopTab("guest")}
-                  >
-                    侵食の客
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={shopTab === "item"}
-                    className={shopTab === "item" ? "on" : ""}
-                    onClick={() => setShopTab("item")}
-                  >
-                    道具
-                  </button>
-                </div>
-                {g.lastEarned > 0 && <p className="shop-gain stagger">今回獲得 +{g.lastEarned} 両</p>}
-                {g.lastMarks > 0 && <p className="shop-gain stagger">今回華 +{g.lastMarks}</p>}
-                <p className="shop-bank stagger">
-                  所持両 <strong>{g.bank}</strong>
-                  　華 <strong>{g.markBank}</strong>
-                  {g.debug && (
-                    <span className="debug-step inline">
-                      <button type="button" onClick={() => { debugNudge(g, "bank", -1); setTick((n) => n + 1); }}>−</button>
-                      <button type="button" onClick={() => { debugNudge(g, "bank", 1); setTick((n) => n + 1); }}>＋</button>
-                    </span>
-                  )}
-                </p>
-                {shopTab === "base" && g.bank <= 0 && g.lastEarned <= 0 && (
-                  <p className="shop-hint stagger">両がありません。ランで稼ぐと強化できます。</p>
-                )}
-                {shopTab === "guest" && (
-                  <p className="shop-hint stagger">種類ごとに華で在庫を増やす。挑戦中は右上の華を押して、空マスへ置く。</p>
-                )}
-                {shopTab === "item" && (
-                  <p className="shop-hint stagger">名前を一度押すと効果。もう一度で買います。挑戦中は左下の札から。</p>
-                )}
-              </div>
-              <div className="shop-scroll">
-                {shopTab === "item" ? (
-                  <div className="shop-list">
-                    {ITEMS.map((it) => (
-                      <ItemRow key={it.id} g={g} id={it.id} onChange={() => setTick((n) => n + 1)} />
-                    ))}
-                  </div>
-                ) : shopTab === "guest" ? (
-                  <div className="shop-list">
-                    {GUEST_KINDS.map((kind) => (
-                      <GuestRow key={kind.id} g={g} id={kind.id} onChange={() => setTick((n) => n + 1)} />
-                    ))}
-                  </div>
-                ) : (
-                  <>
-                <div className="shop-list">
-                  {SHOP_ITEMS.map((item) => (
-                    <ShopRow key={item.id} g={g} id={item.id} name={item.name} desc={item.desc} onChange={() => setTick((n) => n + 1)} />
-                  ))}
-                </div>
-                {(shopT1Maxed(g.shop) || g.debug) && (
-                  <>
-                    <div className="ribbon">二の強化</div>
-                    <p className="shop-hint">
-                      消費 {shopT2Spent(g.shop).toLocaleString("ja-JP")} / {SHOP_T3_SPEND.toLocaleString("ja-JP")} 両。全部 Lv.2 以上で三の強化。
-                    </p>
-                    <div className="shop-list">
-                      {SHOP_T2_ITEMS.map((item) => (
-                        <ShopRow key={item.id} g={g} id={item.id} name={item.name} desc={item.desc} onChange={() => setTick((n) => n + 1)} />
-                      ))}
-                    </div>
-                  </>
-                )}
-                {(shopT3Open(g.shop) || g.debug) && (
-                  <>
-                    <div className="ribbon">三の強化</div>
-                    <p className="shop-hint">
-                      消費 {shopT3Spent(g.shop).toLocaleString("ja-JP")} / {SHOP_T4_SPEND.toLocaleString("ja-JP")} 両。全部 Lv.2 以上で四の強化。
-                    </p>
-                    <div className="shop-list">
-                      {SHOP_T3_ITEMS.map((item) => (
-                        <ShopRow key={item.id} g={g} id={item.id} name={item.name} desc={item.desc} onChange={() => setTick((n) => n + 1)} />
-                      ))}
-                    </div>
-                  </>
-                )}
-                {(shopT4Open(g.shop) || g.debug) && (
-                  <>
-                    <div className="ribbon">四の強化</div>
-                    <p className="shop-hint">足枷・薄皮・自動重ね。三の強化を深く買った先。</p>
-                    <div className="shop-list">
-                      {SHOP_T4_ITEMS.map((item) => (
-                        <ShopRow key={item.id} g={g} id={item.id} name={item.name} desc={item.desc} onChange={() => setTick((n) => n + 1)} />
-                      ))}
-                    </div>
-                  </>
-                )}
-                  </>
-                )}
-              </div>
-              <div className="shop-foot">
-                <button type="button" className="cta stagger" onClick={start} disabled={!ready}>
-                  次の挑戦
-                </button>
-                <button type="button" className="ghost-btn stagger" onClick={() => setShopOpen(false)}>
-                  タイトルへ
-                </button>
-              </div>
-            </div>
-          </div>
+        {seat !== "guest" && kind === "title" && shopOpen && g && (
+          <ShopPanel
+            g={g}
+            tab={shopTab}
+            ready={ready}
+            onTab={setShopTab}
+            onChange={() => setTick((n) => n + 1)}
+            onStart={start}
+            onTitle={() => setShopOpen(false)}
+          />
         )}
-        {kind === "title" && !shopOpen && (
+        {seat !== "guest" && kind === "title" && !shopOpen && (
           <div className="overlay-scrim">
             <div className="overlay-panel enter">
               <div className="display-sub stagger">ONRYO RING</div>
               <h1 className="display-title stagger">怨霊円陣</h1>
               <p className="build-stamp stagger">ビルド {BUILD_STAMP}（日本時間）</p>
-              <p className="overlay-copy stagger">
-                手前の手毬を壊すと式神が召喚される。
-                花魁は回転寿司のレーンをゴールへ進む。
-              </p>
-              <p className="how-to stagger">
-                皿は途切れず、8分は流れ続ける。金皿のあとほど硬い
-                <br />
-                金皿を崩すとパワーアップ３択。ゴールへ着くと敗北
-              </p>
               <button type="button" className="cta stagger" onClick={start} disabled={!ready}>
                 {ready ? "挑戦する" : "読み込み中"}
               </button>
+              <RoomBox
+                seat={seat}
+                code={roomCode.slice(5)}
+                connected={peers.filter((p) => p.connectionState === "connected").length}
+                draft={joinDraft}
+                note={roomNote}
+                onDraft={setJoinDraft}
+                onJoin={joinRoom}
+                onOpen={openRoom}
+                onLeave={leaveRoom}
+              />
               <button type="button" className="ghost-btn stagger" onClick={() => setShopOpen(true)}>
                 式神強化
               </button>
@@ -460,219 +616,189 @@ export function GameView() {
             </div>
           </div>
         )}
-        {kind === "weapon" && g && (
-          <div className="overlay-scrim">
-            <div className="overlay-panel enter">
-              <button type="button" className="weapon-hex-wrap" onClick={() => setHexOnly(false)} aria-label="武器昇格">
-                <div className="weapon-hex" aria-hidden>
-                  <span className="weapon-slash" />
-                  <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
-                    <path d="M20 30C14 14 22 8 26 20" stroke="#e8c15a" strokeWidth="2.2" />
-                    <path d="M44 30C50 14 42 8 38 20" stroke="#e8c15a" strokeWidth="2.2" />
-                    <ellipse cx="32" cy="30" rx="13" ry="12" fill="#f4efe4" />
-                    <ellipse cx="27" cy="29" rx="2.3" ry="2.8" fill="#1c1510" />
-                    <ellipse cx="37" cy="29" rx="2.3" ry="2.8" fill="#1c1510" />
-                    <path d="M32 32.5 L35 37 H29 Z" fill="#1c1510" />
-                    <rect x="25" y="40" width="14" height="7" rx="2" fill="#f4efe4" />
-                    <path d="M28 40v7M32 40v7M36 40v7" stroke="#1c1510" strokeWidth="1.2" />
-                  </svg>
-                </div>
-                <div className="ribbon">武器昇格</div>
-              </button>
-              {!hexOnly && (
-                <div className="weapon-picks enter">
-                  {g.weaponOptions.map((o) => (
-                    <button
-                      key={o.id + tick}
-                      type="button"
-                      className="choice-card weapon-pick stagger"
-                      onClick={() => {
-                        chooseWeapon(g, o.id);
-                        setKind("none");
-                      }}
-                    >
-                      <span className="nm">{o.name}</span>
-                      <span className="st">{o.desc}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-        {kind === "route" && g && (
-          <div className="overlay-scrim">
-            <div className="overlay-panel enter">
-              <div className="ribbon stagger">ルート選択</div>
-              <div className="choice-row">
-                {g.routeOptions.map((o, i) => (
-                  <button
-                    key={o.id + tick}
-                    type="button"
-                    className={`choice-card ${o.risk ? "risk" : "safe"} stagger`}
-                    onClick={() => {
-                      chooseRoute(g, i);
-                      setKind(g.mode === "fail" ? "fail" : "none");
-                    }}
-                  >
-                    <img src={`/assets/${o.id}.png`} alt="" width={96} height={96} />
-                    <span className="nm">{o.name}</span>
-                    <span className="atk">{o.atkLabel}</span>
-                    <span className="chance-label">{o.chanceLabel}</span>
-                    <span className="stars" aria-label="星5">
-                      <span className="star" />
-                      <span className="star" />
-                      <span className="star" />
-                      <span className="star" />
-                      <span className="star" />
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-        {kind === "fail" && g && (
-          <div className="overlay-scrim">
-            <div className="overlay-panel enter">
-              <div className="fail-mark stagger">挑戦失敗</div>
-              <p className="stat-line stagger">
-                WAVE {g.wave}　戦闘力 {g.combatPower}
-              </p>
-              <p className="overlay-copy stagger">花魁がゴールへ流れ着いた。円陣は破れた。</p>
-              {g.lastEarned > 0 && <p className="shop-gain stagger">獲得両 +{g.lastEarned}</p>}
-              {g.lastMarks > 0 && <p className="shop-gain stagger">獲得華 +{g.lastMarks}</p>}
-              {g.playStyle === "active" && !failManual && (
-                <>
-                  <p className="shop-hint stagger">掴んでいるあいだ、円陣を止められます。</p>
-                  <div className="play-style stagger" role="group" aria-label="操作">
-                    <button type="button" className="debug-switch on">
-                      アクティブ
-                    </button>
-                    <button
-                      type="button"
-                      className="debug-switch"
-                      onClick={() => {
-                        setPlayStyle(g, "manual");
-                        setFailManual(true);
-                      }}
-                    >
-                      マニュアル
-                    </button>
-                  </div>
-                </>
-              )}
-              {failManual && (
-                <p className="shop-hint stagger">マニュアルにしました。再挑戦から、動かしている間は止まります。</p>
-              )}
-              <button
-                type="button"
-                className="cta stagger"
-                onClick={() => {
-                  audio.unlockAudio();
-                  resetRun(g, false);
-                  setShopOpen(false);
-                  setKind("none");
-                }}
-              >
-                再挑戦
-              </button>
-              <button
-                type="button"
-                className="ghost-btn stagger"
-                onClick={() => {
-                  resetRun(g, true);
-                  setShopOpen(true);
-                  setKind("title");
-                }}
-              >
-                式神強化へ
-              </button>
-              <button
-                type="button"
-                className="ghost-btn stagger"
-                onClick={() => {
-                  resetRun(g, true);
-                  setShopOpen(false);
-                  setKind("title");
-                }}
-              >
-                タイトルへ
-              </button>
-              <button type="button" className="ghost-btn stagger" onClick={() => setCodexOpen(true)}>
-                図鑑
-              </button>
-            </div>
-          </div>
-        )}
-        {kind === "paused" && g && (
-          <div className="overlay-scrim">
-            <div className="overlay-panel enter">
-              <div className="ribbon stagger">休止</div>
-              <p className="overlay-copy stagger">円陣は止まっている。</p>
-              <button
-                type="button"
-                className="cta stagger"
-                onClick={() => {
-                  setMode(g, "playing");
-                  setKind("none");
-                }}
-              >
-                再開
-              </button>
-              <button
-                type="button"
-                className="ghost-btn stagger"
-                onClick={() => {
-                  resetRun(g, true);
-                  setKind("title");
-                }}
-              >
-                タイトルへ
-              </button>
-              <button type="button" className="ghost-btn stagger" onClick={() => setCodexOpen(true)}>
-                図鑑
-              </button>
-            </div>
-          </div>
-        )}
-        {showPlayHud && ready && (
-          <button
-            type="button"
-            className="hud-icon pause"
-            aria-label={kind === "paused" ? "再開" : "休止"}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              const game = gameRef.current;
-              if (!game) return;
-              if (game.mode === "playing") {
-                setMode(game, "paused");
-                setKind("paused");
-              } else if (game.mode === "paused") {
-                setMode(game, "playing");
-                setKind("none");
-              }
+        {seat !== "guest" && kind === "weapon" && g && (
+          <WeaponOverlay
+            options={g.weaponOptions}
+            hexOnly={hexOnly}
+            tick={tick}
+            onReveal={() => setHexOnly(false)}
+            onPick={(id) => {
+              chooseWeapon(g, id);
+              setKind("none");
             }}
-          >
-            {kind === "paused" ? "再開" : "休止"}
-          </button>
+          />
         )}
-        {showPlayHud && g && !settingsOpen && <DebugDock g={g} onChange={() => setTick((n) => n + 1)} />}
+        {seat !== "guest" && kind === "route" && g && (
+          <RouteOverlay
+            options={g.routeOptions}
+            tick={tick}
+            onPick={(i) => {
+              chooseRoute(g, i);
+              setKind(g.mode === "fail" ? "fail" : "none");
+            }}
+          />
+        )}
+        {seat !== "guest" && kind === "warn" && g && (
+          <DangerWarn
+            onClose={() => {
+              setMode(g, "playing");
+              setKind("none");
+            }}
+          />
+        )}
+        {seat !== "guest" && kind === "clear" && g && (
+          <ClearOverlay
+            wave={g.wave}
+            coins={Math.max(0, Math.floor(g.coins))}
+            marks={g.marks}
+            onContinue={() => {
+              continueClear(g);
+              setKind(g.mode === "route" ? "route" : "none");
+            }}
+            onCashOut={() => {
+              cashOutRun(g);
+              resetRun(g, true);
+              setShopOpen(false);
+              setKind("title");
+            }}
+          />
+        )}
+        {seat !== "guest" && kind === "fail" && g && (
+          <FailOverlay
+            wave={g.wave}
+            power={g.combatPower}
+            earned={g.lastEarned}
+            marks={g.lastMarks}
+            offerManual={g.playStyle === "active" && !failManual}
+            manualOn={failManual}
+            onManual={() => {
+              setPlayStyle(g, "manual");
+              setFailManual(true);
+            }}
+            onRetry={() => {
+              audio.unlockAudio();
+              resetRun(g, false);
+              setShopOpen(false);
+              setKind("none");
+            }}
+            onShop={() => {
+              resetRun(g, true);
+              setShopOpen(true);
+              setKind("title");
+            }}
+            onTitle={() => {
+              resetRun(g, true);
+              setShopOpen(false);
+              setKind("title");
+            }}
+            onCodex={() => setCodexOpen(true)}
+          />
+        )}
+        {seat !== "guest" && kind === "paused" && g && (
+          <PauseOverlay
+            onResume={() => {
+              setMode(g, "playing");
+              setKind("none");
+            }}
+            onTitle={() => {
+              resetRun(g, true);
+              setKind("title");
+            }}
+            onCodex={() => setCodexOpen(true)}
+          />
+        )}
+        {seat === "guest" && kind !== "none" && kind !== "clear" && kind !== "warn" && (
+          <GuestWait
+            code={roomCode.slice(5)}
+            hostLinked={peers.some((p) => p.name === "主催" && p.connectionState === "connected")}
+            phase={kind === "title" ? "title" : "watch"}
+            onLeave={leaveRoom}
+          />
+        )}
+        {showPlayHud && ready && g && (
+          <div className="hud-corner">
+            {g.itemListOpen && (
+              <div className="hud-slips">
+                {ITEMS.map((it) => {
+                  const left = g.itemT[it.id] ?? 0;
+                  const on = left > 0;
+                  const afford = g.coins >= it.price;
+                  return (
+                    <button
+                      key={it.id}
+                      type="button"
+                      className={`hud-slip${on ? " on" : ""}`}
+                      disabled={!on && !afford}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (seat === "guest") {
+                          if (!linkedRef.current) return;
+                          roomRef.current?.send({ t: "item", id: it.id, n: nextNonce() } satisfies NetMsg);
+                        } else {
+                          buyItem(g, it.id);
+                        }
+                        setTick((n) => n + 1);
+                      }}
+                    >
+                      <b>{it.name}</b>
+                      <small>{on ? `${Math.ceil(left)}秒` : `${it.price}両`}</small>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <button
+              type="button"
+              className={`hud-icon slips${g.itemListOpen || ITEMS.some((it) => (g.itemT[it.id] ?? 0) > 0) ? " on" : ""}`}
+              aria-expanded={g.itemListOpen}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                g.itemListOpen = !g.itemListOpen;
+                setTick((n) => n + 1);
+              }}
+            >
+              札
+            </button>
+            {seat !== "guest" && (
+              <PauseButton
+                paused={kind === "paused"}
+                onToggle={() => {
+                  const game = gameRef.current;
+                  if (!game) return;
+                  if (game.mode === "playing") {
+                    setMode(game, "paused");
+                    setKind("paused");
+                  } else if (game.mode === "paused") {
+                    setMode(game, "playing");
+                    setKind("none");
+                  }
+                }}
+              />
+            )}
+          </div>
+        )}
+        {showPlayHud && g && !settingsOpen && seat !== "guest" && <DebugDock g={g} onChange={() => setTick((n) => n + 1)} />}
         {showPlayHud && ready && g && g.guestPick && !settingsOpen && (
           <HeroCard g={g} id={g.guestPick} hint={GUEST_HINT} />
+        )}
+        {seat === "guest" && kind === "none" && (
+          <GuestBar linked={linked} code={roomCode.slice(5)} onLeave={leaveRoom} />
         )}
         {showPlayHud && ready && g && !settingsOpen && (
           <div className="hud-guests">
             <button
               type="button"
-              className={`hud-mark${guestOpen ? " on" : ""}`}
-              aria-label={`華 ${g.marks}`}
-              aria-expanded={guestOpen}
+              className={`hud-mark${g.guestListOpen ? " on" : ""}`}
+              aria-label={seat === "guest" ? `客神 ${GUEST_KINDS.reduce((n, k) => n + (g.guestLeft[k.id] ?? 0), 0)}` : `華 ${g.marks}`}
+              aria-expanded={g.guestListOpen}
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                setGuestOpen((on) => !on);
+                g.guestListOpen = !g.guestListOpen;
+                if (!g.guestListOpen) g.guestPick = null;
+                setTick((n) => n + 1);
               }}
             >
               <svg className="mark-flower" viewBox="0 0 24 24" aria-hidden="true">
@@ -685,10 +811,14 @@ export function GameView() {
                 </g>
                 <circle cx="12" cy="12" r="2.6" fill="#fff4c8" />
               </svg>
-              <span className="n">{g.marks}</span>
+              <span className="n">
+                {seat === "guest"
+                  ? GUEST_KINDS.reduce((n, k) => n + (g.guestLeft[k.id] ?? 0), 0)
+                  : g.marks}
+              </span>
             </button>
-            {guestOpen && (
-              <div className="guest-menu">
+            {g.guestListOpen && (
+              <div className="hud-guest-list">
                 {GUEST_KINDS.map((kind) => {
                   const left = g.guestLeft[kind.id] ?? 0;
                   const on = g.guestPick === kind.id;
@@ -710,8 +840,9 @@ export function GameView() {
                         setTick((n) => n + 1);
                       }}
                     >
-                      <img src={`/assets/${kind.id}.png`} alt="" width={40} height={40} />
-                      <span className="n">{on ? "マスへ" : `${HEROES[kind.id].name} ${left}`}</span>
+                      <img src={`/assets/${kind.id}.png`} alt="" width={32} height={32} />
+                      <span className="n">{on ? "マスへ" : HEROES[kind.id].name}</span>
+                      <span className="c">{left}</span>
                     </button>
                   );
                 })}
@@ -719,19 +850,22 @@ export function GameView() {
             )}
           </div>
         )}
-        <button
-          type="button"
-          className="hud-icon settings"
-          aria-label="設定"
-          aria-pressed={settingsOpen}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            setSettingsOpen((on) => !on);
-          }}
-        >
-          設定
-        </button>
+        {seat === "host" && kind === "none" && <RoomChip code={roomCode.slice(5)} />}
+        {seat !== "guest" && (
+          <button
+            type="button"
+            className="hud-icon settings"
+            aria-label="設定"
+            aria-pressed={settingsOpen}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              setSettingsOpen((on) => !on);
+            }}
+          >
+            設定
+          </button>
+        )}
         {!settingsOpen && (
         <button
           type="button"
@@ -747,14 +881,38 @@ export function GameView() {
           {muted ? "消音" : "音声"}
         </button>
         )}
-        {settingsOpen && g && (
+        {seat !== "guest" && settingsOpen && g && (
           <SettingsPanel
             g={g}
+            tutorialOn={tutorialOn}
+            tutorialMode={tutorialMode}
+            onTutorial={(on) => {
+              setTutorialShow(on);
+              setTutorialOn(on);
+              setTutorialMode(on ? "on" : "off");
+            }}
+            onReplayTutorial={() => {
+              setSettingsOpen(false);
+              const game = gameRef.current;
+              if (!game) return;
+              if (game.mode === "title" || game.mode === "fail" || game.demo) {
+                openRun(true);
+                return;
+              }
+              startLesson(game);
+              setLesson("move");
+            }}
             onClose={() => setSettingsOpen(false)}
             onChange={() => setTick((n) => n + 1)}
           />
         )}
         {codexOpen && g && <CodexPanel g={g} onClose={() => setCodexOpen(false)} />}
+        {roomHelp && seat === "host" && kind === "title" && !shopOpen && !settingsOpen && (
+          <RoomOpened code={roomCode.slice(5)} onClose={() => setRoomHelp(false)} />
+        )}
+        {lesson && seat !== "guest" && !settingsOpen && kind !== "title" && kind !== "fail" && kind !== "clear" && kind !== "warn" && (
+          <LessonBar step={lesson} onSkip={skipLesson} />
+        )}
       </div>
     </div>
   );
@@ -766,6 +924,8 @@ function overlayOf(g: Game): OverlayKind {
   if (g.mode === "buff") return "buff";
   if (g.mode === "route") return "route";
   if (g.mode === "fail") return "fail";
+  if (g.mode === "clear") return "clear";
+  if (g.mode === "warn") return "warn";
   if (g.mode === "paused") return "paused";
   return "none";
 }
@@ -786,130 +946,6 @@ function AuthSlot({ isPending, signedIn }: { isPending: boolean; signedIn: boole
       <a href="/login" className="terms-link">
         Googleで保存
       </a>
-    </div>
-  );
-}
-
-const SHOP_DEBUG_FIELD: Record<ShopId, DebugField> = {
-  atk: "shopAtk",
-  spd: "shopSpd",
-  coin: "shopCoin",
-  okiku: "shopOkiku",
-  path: "shopPath",
-  base: "shopBase",
-  seed: "shopSeed",
-  back: "shopBack",
-  arms: "shopArms",
-  slow: "shopSlow",
-  thin: "shopThin",
-  auto: "shopAuto",
-};
-
-function ShopRow({
-  g,
-  id,
-  name,
-  desc,
-  onChange,
-}: {
-  g: Game;
-  id: ShopId;
-  name: string;
-  desc: string;
-  onChange: () => void;
-}) {
-  const lv = g.shop[id];
-  const cost = shopCost(id, lv);
-  const maxed = lv >= shopMax(id);
-  const can = !maxed && g.bank >= cost;
-  return (
-    <div className="shop-row stagger">
-      <div className="shop-copy">
-        <div className="nm">{name}</div>
-        <div className="lv">
-          Lv.{lv} → 現在 {shopValue(id, lv)}
-        </div>
-        <div className="st">{desc}</div>
-      </div>
-      <button
-        type="button"
-        className="shop-buy"
-        disabled={!can}
-        onClick={() => {
-          if (buyShop(g, id)) onChange();
-        }}
-      >
-        {maxed ? "最大" : `${cost.toLocaleString("ja-JP")} 両`}
-      </button>
-      {g.debug && (
-        <div className="debug-step">
-          <button type="button" onClick={() => { debugNudge(g, SHOP_DEBUG_FIELD[id], -1); onChange(); }}>−</button>
-          <button type="button" onClick={() => { debugNudge(g, SHOP_DEBUG_FIELD[id], 1); onChange(); }}>＋</button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ItemRow({ g, id, onChange }: { g: Game; id: (typeof ITEMS)[number]["id"]; onChange: () => void }) {
-  const it = ITEMS.find((item) => item.id === id)!;
-  const n = g.itemStock[id] ?? 0;
-  const can = n < 99 && g.bank >= it.cost;
-  const [open, setOpen] = useState(false);
-  const lastTap = useRef(0);
-  const onTap = () => {
-    const now = performance.now();
-    const again = open && now - lastTap.current < 400;
-    lastTap.current = now;
-    setOpen(true);
-    if (again && buyItem(g, id)) onChange();
-  };
-  return (
-    <div className="guest-row stagger">
-      <button type="button" className="shop-copy item-tap" onClick={onTap}>
-        <div className="nm">{it.name}</div>
-        <div className="lv">所持 {n}　{it.sec}秒　{it.cost.toLocaleString("ja-JP")} 両</div>
-      </button>
-      {open && <p className="guest-row-hint">{it.desc}　{can ? "もう一度で買う" : n >= 99 ? "最大" : "両が足りません"}</p>}
-    </div>
-  );
-}
-
-function GuestRow({ g, id, onChange }: { g: Game; id: HeroId; onChange: () => void }) {
-  const kind = GUEST_KINDS.find((k) => k.id === id)!;
-  const n = g.guestStock[id] ?? 0;
-  const price = guestCost(kind, n);
-  const maxed = n >= kind.max;
-  const can = !maxed && g.markBank >= price;
-  const hero = HEROES[id];
-  return (
-    <div className="guest-row stagger">
-      <div className="guest-row-top">
-        <img src={`/assets/${id}.png`} alt="" width={56} height={56} className="guest-face" />
-        <div className="shop-copy">
-          <div className="nm">{hero.name}</div>
-          <div className="lv">在庫 {n} / {kind.max}</div>
-        </div>
-      </div>
-      <p className="guest-row-hint">右上の顔を選んで空マスへ置く。ラン開始時にこの在庫まで。</p>
-      <div className="guest-row-actions">
-        <button
-          type="button"
-          className="shop-buy"
-          disabled={!can}
-          onClick={() => {
-            if (buyGuest(g, id)) onChange();
-          }}
-        >
-          {maxed ? "最大" : `${price.toLocaleString("ja-JP")} 華`}
-        </button>
-        {g.debug && (
-          <div className="debug-step">
-            <button type="button" onClick={() => { nudgeGuest(g, id, -1); onChange(); }}>−</button>
-            <button type="button" onClick={() => { nudgeGuest(g, id, 1); onChange(); }}>＋</button>
-          </div>
-        )}
-      </div>
     </div>
   );
 }

@@ -3,7 +3,7 @@
   マスを正方形グリッドに戻すな。円陣は同心円 SLOT_LAYOUT。
   近接の長さは swingLen / swingTip が描画と当たりの唯一の定義。
 */
-import type { HeroDef, HeroId, ItemId, ItemStock, Role, RouteOption, ShopId, ShopUpgrades, WeaponOption, GuestStock } from "./types";
+import type { BuffPickId, GuestStock, HeroDef, HeroId, ItemId, Role, RouteOption, ShopId, ShopUpgrades, WeaponOption, WeaponPickId } from "./types";
 
 export const VW = 390;
 export const VH = 844;
@@ -58,6 +58,13 @@ export const GOAL_A = (Math.PI * 4) / 3;
 export const BELT_SPAN = Math.PI * 1.72;
 export const BELT_SLOTS = 20;
 export const BELT_START = 0.48;
+/** 花魁の位置がこれ未満ならゴールが近い。0 がゴール。 */
+export const DANGER_TRACK = 0.14;
+
+export function oiranDanger(track: number): number {
+  if (track >= DANGER_TRACK) return 0;
+  return Math.max(0, Math.min(1, 1 - track / DANGER_TRACK));
+}
 export const BELT_FILL = 10;
 export const NETA_SPAWN_CD = 2;
 export const NETA_RESERVE = 240;
@@ -109,6 +116,11 @@ export const HEROES: Record<HeroId, HeroDef> = {
     range: 64,
     color: "#d4a07a",
     projectile: "#e8c9a0",
+    weapon: "井戸の柄杓",
+    blurb: "井戸から上がった童。円の手前を守る。",
+    reachBase: 47,
+    reachPer: 0,
+    tipBase: 8,
   },
   mio: {
     id: "mio",
@@ -121,6 +133,11 @@ export const HEROES: Record<HeroId, HeroDef> = {
     range: 96,
     color: "#f0e6d8",
     projectile: "#9ad8e8",
+    weapon: "白狐の幣",
+    blurb: "白い狐の巫女。遠くの皿へ光を放つ。",
+    reachBase: 33,
+    reachPer: 3,
+    tipBase: 5,
   },
   kuro: {
     id: "kuro",
@@ -133,6 +150,11 @@ export const HEROES: Record<HeroId, HeroDef> = {
     range: 68,
     color: "#3a2a28",
     projectile: "#c45a4a",
+    weapon: "二尾の刃",
+    blurb: "短い刃を速く回す。縁に近いほど強い。",
+    reachBase: 46,
+    reachPer: 4,
+    tipBase: 6,
   },
   hakumen: {
     id: "hakumen",
@@ -145,6 +167,11 @@ export const HEROES: Record<HeroId, HeroDef> = {
     range: 104,
     color: "#c8b8d8",
     projectile: "#b48cff",
+    weapon: "無貌の杖",
+    blurb: "顔のない客人。杖の先から怨を飛ばす。",
+    reachBase: 33,
+    reachPer: 3,
+    tipBase: 5,
   },
   takaten: {
     id: "takaten",
@@ -157,6 +184,11 @@ export const HEROES: Record<HeroId, HeroDef> = {
     range: 74,
     color: "#e8e4dc",
     projectile: "#7ec8e0",
+    weapon: "白帽の鎌",
+    blurb: "白い帽子の刈り手。鎌は円の外まで届く。",
+    reachBase: 48,
+    reachPer: 4,
+    tipBase: 7,
   },
   shion: {
     id: "shion",
@@ -169,6 +201,28 @@ export const HEROES: Record<HeroId, HeroDef> = {
     range: 70,
     color: "#b080d8",
     projectile: "#d4b0f0",
+    weapon: "紫陽のかんざし",
+    blurb: "侵食に招かれた客。花の簪で円の縁を払う。",
+    reachBase: 47,
+    reachPer: 0,
+    tipBase: 7,
+  },
+  monika: {
+    id: "monika",
+    name: "モニカ",
+    title: "客神",
+    rarity: "elite",
+    role: "melee",
+    atk: 1,
+    interval: 0.96,
+    range: 76,
+    color: "#9ec8ea",
+    projectile: "#d6ecff",
+    weapon: "蒼のリボン",
+    blurb: "白い帽子の客。光のリボンで円の縁を払う。",
+    reachBase: 50,
+    reachPer: 0,
+    tipBase: 6,
   },
 };
 
@@ -176,8 +230,11 @@ export const CORE_HERO_IDS: HeroId[] = ["okiku", "mio", "kuro", "hakumen", "taka
 
 export type GuestKind = { id: HeroId; cost: number; max: number; start: number };
 
-/** 客神のカタログ。cost は開始在庫からの最初の1体。以後は 3倍。紫苑は 2→8 で約10.9万華。 */
-export const GUEST_KINDS: GuestKind[] = [{ id: "shion", cost: 300, max: 8, start: 2 }];
+/** 客神のカタログ。cost は開始在庫からの最初の1体。以後は 3倍。紫苑は 2→8。モニカは 0 から、最初の1体が 300 華。 */
+export const GUEST_KINDS: GuestKind[] = [
+  { id: "shion", cost: 300, max: 8, start: 2 },
+  { id: "monika", cost: 300, max: 8, start: 0 },
+];
 
 export const GUEST_ID: HeroId = GUEST_KINDS[0]!.id;
 /** 右上の列。華が先、その下に客神。 */
@@ -249,6 +306,11 @@ export function guestLine(stock: GuestStock): string {
   return GUEST_KINDS.map((k) => `${HEROES[k.id].name}${stock[k.id] ?? 0}`).join(" ");
 }
 
+export function hitMarkBadge(x: number, y: number): boolean {
+  const r = MARK_BADGE;
+  return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+}
+
 export function guestTrayRect(i: number): { x: number; y: number; w: number; h: number } {
   return {
     x: GUEST_TRAY.x,
@@ -270,22 +332,7 @@ export function roleLabel(role: Role): string {
   return role === "melee" ? "近接" : "遠距離";
 }
 
-export const HERO_PROFILES: Record<HeroId, { weapon: string; blurb: string }> = {
-  okiku: { weapon: "井戸の柄杓", blurb: "井戸から上がった童。円の手前を守る。" },
-  mio: { weapon: "白狐の幣", blurb: "白い狐の巫女。遠くの皿へ光を放つ。" },
-  kuro: { weapon: "二尾の刃", blurb: "短い刃を速く回す。縁に近いほど強い。" },
-  hakumen: { weapon: "無貌の杖", blurb: "顔のない客人。杖の先から怨を飛ばす。" },
-  takaten: { weapon: "白帽の鎌", blurb: "白い帽子の刈り手。鎌は円の外まで届く。" },
-  shion: { weapon: "紫陽のかんざし", blurb: "侵食に招かれた客。花の簪で円の縁を払う。" },
-};
-
 export const ROSTER_IDS: HeroId[] = [...CORE_HERO_IDS, ...GUEST_KINDS.map((k) => k.id)];
-
-export const GUEST_PROFILE = {
-  ...HERO_PROFILES.shion,
-  role: roleLabel("melee"),
-  hint: GUEST_HINT,
-};
 
 export const RARITY_WEIGHT: Record<string, number> = {
   common: 72,
@@ -312,38 +359,17 @@ export function buffCardRect(i: number): { x: number; y: number; w: number; h: n
   };
 }
 
-/** drawWeapon の scale(s) と、本体側の hs * SWING_REACH をまとめた世界スケール。 */
-function weaponWorldScale(level: number): number {
-  const s = 0.92 + level * 0.18;
-  return s * (SLOT_R / 27) * SWING_REACH;
-}
-
-/** 高天の刃先。drawWeapon の回転前・scale(s) 前。柄の先(+Y)ではなく鎌の先端。 */
-export function takatenBladeLocal(level: number): { x: number; y: number } {
-  return { x: 26 + level * 3, y: 48 + level * 4 };
-}
-
-/** 武器ローカル座標（scale 前）。通常は +Y。高天だけ鎌の刃先。 */
-function weaponLocalTip(h: { defId: HeroId; level: number }): { x: number; y: number } {
-  if (h.defId === "okiku") return { x: 0, y: 47 };
-  if (h.defId === "kuro") return { x: 0, y: 46 + h.level * 4 };
-  if (h.defId === "takaten") return takatenBladeLocal(h.level);
-  if (h.defId === "shion") return { x: 0, y: 47 };
-  return { x: 0, y: 36 + (h.level - 1) * 3 };
-}
-
 /** World length of the drawn weapon. drawWeapon の rotate(+Y) と同じ向き。cos/sin で先端を取ると90度ずれる。 */
 export function swingLen(h: { defId: HeroId; level: number }): number {
-  const tip = weaponLocalTip(h);
-  return Math.hypot(tip.x, tip.y) * weaponWorldScale(h.level);
+  const hs = (SLOT_R / 27) * SWING_REACH;
+  const s = 0.92 + h.level * 0.18;
+  const d = HEROES[h.defId];
+  const L = d.reachBase + h.level * d.reachPer;
+  return L * s * hs;
 }
 
 export function swingTipR(h: { defId: HeroId; level: number }): number {
-  if (h.defId === "okiku") return 8 + h.level;
-  if (h.defId === "kuro") return 6 + h.level;
-  if (h.defId === "takaten") return 7 + h.level;
-  if (h.defId === "shion") return 7 + h.level;
-  return 5 + h.level;
+  return HEROES[h.defId].tipBase + h.level;
 }
 
 export function swingTip(
@@ -355,13 +381,10 @@ export function swingTip(
 ): { x: number; y: number } {
   const n = Math.max(1, arms);
   const a = h.swing + (arm * Math.PI * 2) / n;
-  const tip = weaponLocalTip(h);
-  const k = weaponWorldScale(h.level);
-  const lx = tip.x * k;
-  const ly = tip.y * k;
+  const len = swingLen(h);
   return {
-    x: x + lx * Math.cos(a) - ly * Math.sin(a),
-    y: y + lx * Math.sin(a) + ly * Math.cos(a),
+    x: x - Math.sin(a) * len,
+    y: y + Math.cos(a) * len,
   };
 }
 
@@ -468,14 +491,14 @@ export function isMultiHit(level: number): boolean {
   return displayLevel(level) > 10;
 }
 
-export const WEAPON_POOL: WeaponOption[] = [
+export const WEAPON_POOL: Array<WeaponOption & { id: WeaponPickId }> = [
   { id: "atk", name: "鬼金棒", desc: "全員の攻撃力 +30%" },
   { id: "spd", name: "時雨", desc: "攻撃速度 +22%" },
   { id: "gold", name: "金運", desc: "獲得コイン +40%" },
   { id: "cheap", name: "口寄せ札", desc: "手毬1つにつき式神がもう1体。重ねると増える" },
 ];
 
-export const BUFF_POOL: WeaponOption[] = [
+export const BUFF_POOL: Array<WeaponOption & { id: BuffPickId }> = [
   { id: "atk", name: "攻撃力UP", desc: "全員の攻撃力 +15%" },
   { id: "spd", name: "攻撃速度UP", desc: "振りと攻撃間隔が速くなる" },
   { id: "gold", name: "金運UP", desc: "入手両が増える" },
@@ -533,6 +556,7 @@ export const DEBUG_KEY = "onryo-ring-debug";
 export const PLAY_KEY = "onryo-ring-play";
 export const AUTO_KEY = "onryo-ring-auto";
 export const VOICE_KEY = "onryo-ring-voice";
+export const TUTORIAL_KEY = "onryo-ring-tutorial";
 
 export const START_COINS = 60;
 export const SHOP_MAX = 12;
@@ -634,135 +658,49 @@ export function oiranPaceAt(lv: number): number {
   return Math.max(0.2, 1 - 0.12 * Math.max(0, lv));
 }
 
-export function temariThinAt(lv: number): number {
-  return 0.82 ** Math.max(0, lv);
-}
-
-export const ITEM_SHIGURE = 1.85;
-export const ITEM_WARE = 0.28;
-export const ITEM_SUZU = 1.9;
-export const ITEM_SEIJAKU = 30;
-export const ITEM_KAE = 0.016;
-export const ITEM_KAE_KILL = 2;
-export const ITEM_MAX = 99;
-
 export type ItemDef = {
   id: ItemId;
   name: string;
-  short: string;
   sec: number;
-  cost: number;
-  desc: string;
+  price: number;
+  blurb: string;
 };
 
-/** 使い捨て。効果は sec 秒。在庫は両で買い、使った分だけ減る。 */
+/** 挑戦中に両で買う使い捨て。効いている秒数のあいだ同じ札は買えない。 */
 export const ITEMS: ItemDef[] = [
-  { id: "senko", name: "線香", short: "線香", sec: 10, cost: 240, desc: "花魁の歩みが止まる。式神と皿の処理は続く。" },
-  { id: "shigure", name: "時雨傘", short: "時雨", sec: 10, cost: 180, desc: "振りと攻撃間隔だけが速くなる。金皿の速度とは別。" },
-  { id: "ware", name: "割れ薬", short: "割れ薬", sec: 10, cost: 160, desc: "今いる手毬と、このあいだに補充される手毬の耐久が大きく下がる。" },
-  { id: "utsushi", name: "口寄せの写し", short: "写し", sec: 10, cost: 220, desc: "このあいだ壊した手毬は、式神がもう1体出る。" },
-  { id: "tanzaku", name: "客神の短冊", short: "短冊", sec: 20, cost: 300, desc: "空マスに客神が1体立つ。在庫は減らない。時間で消える。" },
-  { id: "kinpaku", name: "金箔", short: "金箔", sec: 10, cost: 140, desc: "このあいだ倒した皿の両が倍。華は増えない。" },
-  { id: "hanafubuki", name: "華吹雪", short: "華吹雪", sec: 20, cost: 260, desc: "このあいだ倒したレーンの皿から華が出る。両は通常どおり。" },
-  { id: "kaeshiba", name: "返し刃", short: "返し刃", sec: 5, cost: 200, desc: "当たった皿だけ花魁が大きく下がる。倒したときのバックも厚い。" },
-  { id: "suzu", name: "鈴の輪", short: "鈴", sec: 10, cost: 180, desc: "近接の先端だけ当たりが太くなる。体には当たらない。" },
-  { id: "seijaku", name: "静寂", short: "静寂", sec: 5, cost: 320, desc: "叫びなしで、叫びの倍率が最大になる。" },
+  { id: "senko", name: "線香", sec: 10, price: 40, blurb: "花魁が止まる" },
+  { id: "shigure", name: "時雨", sec: 10, price: 30, blurb: "振りが速い" },
+  { id: "ware", name: "割れ", sec: 5, price: 25, blurb: "手前の手毬を割る" },
+  { id: "tanzaku", name: "短冊", sec: 20, price: 50, blurb: "客神が一時来る" },
+  { id: "kinpaku", name: "金箔", sec: 10, price: 35, blurb: "両が倍" },
+  { id: "fubuki", name: "吹雪", sec: 10, price: 40, blurb: "寿司を崩すと華" },
+  { id: "kaeshi", name: "返刃", sec: 10, price: 45, blurb: "押し戻しが倍" },
+  { id: "suzu", name: "鈴", sec: 10, price: 30, blurb: "刃の先が広い" },
+  { id: "seijaku", name: "静寂", sec: 5, price: 55, blurb: "攻撃と速度が3倍" },
+  { id: "maneki", name: "招き", sec: 20, price: 35, blurb: "壊すと追加召喚" },
 ];
 
-export function emptyItemStock(): ItemStock {
+export const SUZU_MUL = 1.9;
+export const SEIJAKU_MUL = 3;
+export const SHIGURE_MUL = 1.7;
+
+export function emptyItemT(): Record<ItemId, number> {
   return {
     senko: 0,
     shigure: 0,
     ware: 0,
-    utsushi: 0,
     tanzaku: 0,
     kinpaku: 0,
-    hanafubuki: 0,
-    kaeshiba: 0,
+    fubuki: 0,
+    kaeshi: 0,
     suzu: 0,
     seijaku: 0,
+    maneki: 0,
   };
 }
 
-export function readItemStock(raw: unknown): ItemStock {
-  const out = emptyItemStock();
-  if (!raw || typeof raw !== "object") return out;
-  const o = raw as Partial<Record<ItemId, unknown>>;
-  for (const it of ITEMS) {
-    const n = o[it.id];
-    const v = typeof n === "number" && Number.isFinite(n) ? Math.floor(n) : 0;
-    out[it.id] = Math.max(0, Math.min(ITEM_MAX, v));
-  }
-  return out;
-}
-
-export function mergeItemStock(a: ItemStock, b: ItemStock): ItemStock {
-  const out = emptyItemStock();
-  for (const it of ITEMS) out[it.id] = Math.max(a[it.id] ?? 0, b[it.id] ?? 0);
-  return out;
-}
-
-export function itemDef(id: ItemId): ItemDef {
-  return ITEMS.find((it) => it.id === id)!;
-}
-
-/** 持っているか、効果が残っている道具。戦闘中のチップ順。 */
-export function carriedItems(stock: ItemStock, left: ItemStock): ItemDef[] {
-  return ITEMS.filter((it) => (stock[it.id] ?? 0) > 0 || (left[it.id] ?? 0) > 0);
-}
-
-export function itemChipRect(index: number): { x: number; y: number; w: number; h: number } {
-  const cols = 5;
-  const w = 72;
-  const h = 36;
-  const gap = 4;
-  const col = index % cols;
-  const row = Math.floor(index / cols);
-  const gridW = cols * w + (cols - 1) * gap;
-  const x0 = (VW - gridW) / 2;
-  const y0 = VH - 168;
-  return { x: x0 + col * (w + gap), y: y0 + row * (h + gap), w, h };
-}
-
-/** 挑戦中は左下の「札」だけ。10枚は開いたメニューの中。 */
-export const ITEM_BTN = { x: 10, y: 688, w: 72, h: 40 };
-export const ITEM_MENU = { x: 14, y: 132, w: 362, h: 540 };
-const ITEM_ROW_H = 40;
-
-export function itemMenuRow(i: number): { x: number; y: number; w: number; h: number } {
-  return {
-    x: ITEM_MENU.x + 10,
-    y: ITEM_MENU.y + 46 + i * ITEM_ROW_H,
-    w: ITEM_MENU.w - 20,
-    h: ITEM_ROW_H - 6,
-  };
-}
-
-export function itemCloseRect(): { x: number; y: number; w: number; h: number } {
-  return { x: ITEM_MENU.x + ITEM_MENU.w - 76, y: ITEM_MENU.y + 10, w: 64, h: 28 };
-}
-
-function inItemRect(x: number, y: number, r: { x: number; y: number; w: number; h: number }): boolean {
-  return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
-}
-
-export function hitItemButton(x: number, y: number): boolean {
-  return inItemRect(x, y, ITEM_BTN);
-}
-
-export function hitItemClose(x: number, y: number): boolean {
-  return inItemRect(x, y, itemCloseRect());
-}
-
-export function hitItemMenu(x: number, y: number): boolean {
-  return inItemRect(x, y, ITEM_MENU);
-}
-
-export function hitItemRow(x: number, y: number): number {
-  for (let i = 0; i < ITEMS.length; i++) {
-    if (inItemRect(x, y, itemMenuRow(i))) return i;
-  }
-  return -1;
+export function temariThinAt(lv: number): number {
+  return 0.82 ** Math.max(0, lv);
 }
 
 export function shopCost(id: ShopId, lv: number): number {

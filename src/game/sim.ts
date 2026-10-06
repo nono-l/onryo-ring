@@ -8,15 +8,12 @@ import {
   BELT_FILL,
   BELT_SLOTS,
   BELT_START,
+  DANGER_TRACK,
   BOSS_X,
   BOSS_Y,
   CORE_HERO_IDS,
   HEROES,
-  guestKind,
-  guestCost,
   isGuest,
-  mergeGuestStock,
-  readGuestStock,
   GOLD_EARLY_EVERY,
   GOLD_FAST_KILLS,
   GOLD_LATE_NORMAL,
@@ -28,20 +25,8 @@ import {
   PIT_X,
   PIT_Y,
   RARITY_WEIGHT,
-  SAVE_KEY,
-  DEBUG_KEY,
-  PLAY_KEY,
-  AUTO_KEY,
-  VOICE_KEY,
   START_COINS,
-  shopCost,
   shopMax,
-  shopT1Maxed,
-  isShopT2,
-  isShopT3,
-  isShopT4,
-  shopT3Open,
-  shopT4Open,
   extraOkikuAt,
   weaponAt,
   routeProcessedAt,
@@ -49,10 +34,12 @@ import {
   wrapBackAt,
   armCount,
   oiranPaceAt,
+  emptyItemT,
+  SEIJAKU_MUL,
+  SHIGURE_MUL,
+  SUZU_MUL,
   runBankGain,
-  readShop,
   SLOT_COUNT,
-  SLOT_HIT_R,
   STACK_BOTTOM,
   STACK_CAP,
   STACK_START,
@@ -69,7 +56,6 @@ import {
   COLLAB_ORB_R,
   COLLAB_SPEED,
   bossHp,
-  buffCardRect,
   displayLevel,
   isMultiHit,
   levelMul,
@@ -83,191 +69,22 @@ import {
   swingTip,
   swingTipR,
   temariHpAt,
-  ITEMS,
-  ITEM_SHIGURE,
-  ITEM_WARE,
-  ITEM_SUZU,
-  ITEM_SEIJAKU,
-  ITEM_KAE,
-  ITEM_KAE_KILL,
-  ITEM_MAX,
-  hitItemButton,
-  hitItemClose,
-  hitItemMenu,
-  hitItemRow,
-  itemDef,
-  emptyItemStock,
-  readItemStock,
-  mergeItemStock,
-  GUEST_ID,
 } from "./data";
-import type { Ball, Game, Hero, HeroId, ItemId, Mode, PlayStyle, Projectile, Role, ShopId, ShopUpgrades, WeaponOption, GuestStock, ItemStock } from "./types";
+import type { Ball, Game, GuestStock, Hero, HeroId, ItemId, Mode, PlayStyle, Projectile, Role, ShopUpgrades, WeaponOption } from "./types";
 import * as audio from "./audio";
 import { pollVoice } from "./mic";
+import { assignMeta, loadAutoMerge, loadDebugFlag, loadMeta, loadPlayStyle, loadVoiceFlag, saveMeta, type MetaSave } from "./persist";
+import { tickItems } from "./items";
+import { applyBuff } from "./picks";
 
 function nid(g: Game): number {
   g.nextId += 1;
   return g.nextId;
 }
 
-export type MetaSave = {
-  version: number;
-  highWave: number;
-  bank: number;
-  markBank: number;
-  guestStock: GuestStock;
-  itemStock: ItemStock;
-  shop: ShopUpgrades;
-};
-
-function emptyMeta(): MetaSave {
-  return { version: 2, highWave: 0, bank: 0, markBank: 0, guestStock: readGuestStock(null), itemStock: emptyItemStock(), shop: readShop() };
-}
-
-function loadMeta(): MetaSave {
-  try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return emptyMeta();
-    const p = JSON.parse(raw) as Partial<MetaSave> & { highWave?: number; guestBank?: number };
-    return {
-      version: 2,
-      highWave: p.highWave ?? 0,
-      bank: p.bank ?? 0,
-      markBank: p.markBank ?? 0,
-      guestStock: readGuestStock(p.guestStock, p.guestBank),
-      itemStock: readItemStock(p.itemStock),
-      shop: readShop(p.shop),
-    };
-  } catch {
-    return emptyMeta();
-  }
-}
-
-export function snapshotMeta(g: Game): MetaSave {
-  return { version: 2, highWave: g.highWave, bank: g.bank, markBank: g.markBank, guestStock: { ...g.guestStock }, itemStock: { ...g.itemStock }, shop: { ...g.shop } };
-}
-
-export function mergeMeta(a: MetaSave, b: MetaSave): MetaSave {
-  return {
-    version: 2,
-    highWave: Math.max(a.highWave, b.highWave),
-    bank: Math.max(a.bank, b.bank),
-    markBank: Math.max(a.markBank, b.markBank),
-    guestStock: mergeGuestStock(a.guestStock ?? {}, b.guestStock ?? {}),
-    itemStock: mergeItemStock(readItemStock(a.itemStock), readItemStock(b.itemStock)),
-    shop: {
-      atk: Math.max(a.shop.atk, b.shop.atk),
-      spd: Math.max(a.shop.spd, b.shop.spd),
-      coin: Math.max(a.shop.coin, b.shop.coin),
-      okiku: Math.max(a.shop.okiku, b.shop.okiku),
-      path: Math.max(a.shop.path, b.shop.path),
-      base: Math.max(a.shop.base, b.shop.base),
-      seed: Math.max(a.shop.seed, b.shop.seed),
-      back: Math.max(a.shop.back, b.shop.back),
-      arms: Math.max(a.shop.arms, b.shop.arms),
-      slow: Math.max(a.shop.slow, b.shop.slow),
-      thin: Math.max(a.shop.thin, b.shop.thin),
-      auto: Math.max(a.shop.auto, b.shop.auto),
-    },
-  };
-}
-
 export function applyMeta(g: Game, meta: MetaSave) {
-  g.highWave = meta.highWave;
-  g.bank = meta.bank;
-  g.markBank = meta.markBank;
-  g.guestStock = readGuestStock(meta.guestStock);
-  g.itemStock = readItemStock(meta.itemStock);
-  if (g.demo || g.mode === "title") g.guestLeft = { ...g.guestStock };
-  g.shop = readShop(meta.shop);
+  assignMeta(g, meta);
   if (g.demo || g.mode === "title") applyShop(g);
-}
-
-let cloudFlush: ((m: MetaSave) => void) | null = null;
-export function setCloudFlush(fn: ((m: MetaSave) => void) | null) {
-  cloudFlush = fn;
-}
-
-function saveMeta(g: Game) {
-  try {
-    if (g.wave > g.highWave) g.highWave = g.wave;
-    localStorage.setItem(SAVE_KEY, JSON.stringify(snapshotMeta(g)));
-  } catch {
-    /* private mode */
-  }
-  cloudFlush?.(snapshotMeta(g));
-}
-
-function loadDebugFlag(): boolean {
-  try {
-    return localStorage.getItem(DEBUG_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-export function setDebugMode(g: Game, on: boolean) {
-  g.debug = on;
-  try {
-    localStorage.setItem(DEBUG_KEY, on ? "1" : "0");
-  } catch {
-    /* private mode */
-  }
-}
-
-function loadPlayStyle(): PlayStyle {
-  try {
-    return localStorage.getItem(PLAY_KEY) === "manual" ? "manual" : "active";
-  } catch {
-    return "active";
-  }
-}
-
-export function setPlayStyle(g: Game, style: PlayStyle) {
-  g.playStyle = style;
-  try {
-    localStorage.setItem(PLAY_KEY, style);
-  } catch {
-    /* private mode */
-  }
-}
-
-function loadAutoMerge(): boolean {
-  try {
-    const v = localStorage.getItem(AUTO_KEY);
-    if (v === "0") return false;
-    if (v === "1") return true;
-  } catch {
-    /* private mode */
-  }
-  return true;
-}
-
-export function setAutoMerge(g: Game, on: boolean) {
-  g.autoMerge = on;
-  try {
-    localStorage.setItem(AUTO_KEY, on ? "1" : "0");
-  } catch {
-    /* private mode */
-  }
-}
-
-function loadVoiceFlag(): boolean {
-  try {
-    return localStorage.getItem(VOICE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-export function setVoiceOn(g: Game, on: boolean) {
-  g.voiceOn = on;
-  if (!on) g.screamMul = 1;
-  try {
-    localStorage.setItem(VOICE_KEY, on ? "1" : "0");
-  } catch {
-    /* private mode */
-  }
 }
 
 export type DebugField =
@@ -297,7 +114,7 @@ export type DebugField =
   | "markBank"
   | "highWave";
 
-function clamp(n: number, lo: number, hi: number) {
+export function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
 }
 
@@ -341,6 +158,22 @@ export function debugUnlockAll(g: Game) {
   g.unlocked = CORE_HERO_IDS.slice();
 }
 
+/** デバッグ。空マスへ指定レベル（内部1〜8、表示は奇数）で式神を置く。在庫は減らさない。 */
+export function debugSummon(g: Game, id: HeroId, level: number): boolean {
+  if (g.mode !== "playing" && g.mode !== "paused") return false;
+  const slot = firstEmpty(g);
+  if (slot < 0) return false;
+  const lv = Math.max(1, Math.min(8, Math.floor(level) || 1));
+  const hero = seedHero(g, id, slot);
+  hero.level = lv;
+  hero.stack = isGuest(id) ? 2 : 1;
+  g.slots[slot] = hero;
+  const p = slotXY(slot);
+  burst(g, p.x, p.y, HEROES[id].color, 10, "puff");
+  recomputePower(g);
+  return true;
+}
+
 export function debugOpenWeapon(g: Game) {
   if (g.mode === "fail") return;
   openWeapon(g);
@@ -364,135 +197,6 @@ export function applyShop(g: Game) {
   g.twinSummon = g.shop.seed;
 }
 
-export function buyShop(g: Game, id: ShopId): boolean {
-  if (isShopT2(id) && !shopT1Maxed(g.shop)) return false;
-  if (isShopT3(id) && !shopT3Open(g.shop)) return false;
-  if (isShopT4(id) && !shopT4Open(g.shop)) return false;
-  const lv = g.shop[id] ?? 0;
-  if (lv >= shopMax(id)) return false;
-  const cost = shopCost(id, lv);
-  if (g.bank < cost) return false;
-  g.bank -= cost;
-  g.shop[id] = lv + 1;
-  if (id === "auto") setAutoMerge(g, true);
-  saveMeta(g);
-  audio.sfxSelect();
-  return true;
-}
-
-export function nudgeGuest(g: Game, id: HeroId, dir: 1 | -1) {
-  const k = guestKind(id);
-  if (!k) return;
-  g.guestStock[id] = clamp((g.guestStock[id] ?? 0) + dir, 0, k.max);
-  if (g.demo || g.mode === "title") g.guestLeft[id] = g.guestStock[id];
-  saveMeta(g);
-}
-
-export function buyGuest(g: Game, id: HeroId): boolean {
-  const k = guestKind(id);
-  if (!k) return false;
-  const n = g.guestStock[id] ?? 0;
-  if (n >= k.max) return false;
-  const price = guestCost(k, n);
-  if (g.markBank < price) return false;
-  g.markBank -= price;
-  g.guestStock[id] = n + 1;
-  if (g.demo || g.mode === "title") g.guestLeft[id] = g.guestStock[id];
-  saveMeta(g);
-  audio.sfxSelect();
-  return true;
-}
-
-export function placeGuest(g: Game, slot: number): boolean {
-  const id = g.guestPick;
-  if (!id || !isGuest(id)) return false;
-  if (g.mode !== "playing" && !g.demo) return false;
-  const left = g.guestLeft[id] ?? 0;
-  if (left <= 0) return false;
-  if (slot < 0 || slot >= SLOT_COUNT) return false;
-  if (g.slots[slot]) return false;
-  g.guestLeft[id] = left - 1;
-  const hero = seedHero(g, id, slot);
-  hero.stack = 2;
-  g.slots[slot] = hero;
-  const p = slotXY(slot);
-  burst(g, p.x, p.y, "#d4b0f0", 12, "puff");
-  float(g, p.x, p.y - 26, HEROES[id].name, HEROES[id].projectile);
-  recomputePower(g);
-  if (!g.demo) audio.sfxSummon();
-  return true;
-}
-
-function dropEphemeral(g: Game) {
-  let gone = false;
-  for (let i = 0; i < g.slots.length; i++) {
-    const h = g.slots[i];
-    if (!h?.ephemeral) continue;
-    g.slots[i] = null;
-    gone = true;
-  }
-  if (gone) recomputePower(g);
-}
-
-function tickItems(g: Game, dt: number) {
-  for (const it of ITEMS) {
-    const t = g.itemT[it.id] ?? 0;
-    if (t <= 0) continue;
-    const next = t - dt;
-    g.itemT[it.id] = next > 0 ? next : 0;
-    if (it.id === "tanzaku" && next <= 0) dropEphemeral(g);
-  }
-}
-
-export function buyItem(g: Game, id: ItemId): boolean {
-  const it = itemDef(id);
-  const n = g.itemStock[id] ?? 0;
-  if (n >= ITEM_MAX) return false;
-  if (g.bank < it.cost) return false;
-  g.bank -= it.cost;
-  g.itemStock[id] = n + 1;
-  saveMeta(g);
-  audio.sfxSelect();
-  return true;
-}
-
-export function useItem(g: Game, id: ItemId): boolean {
-  if (g.mode !== "playing" || g.demo) return false;
-  if (itemOn(g, id)) return false;
-  const n = g.itemStock[id] ?? 0;
-  if (n <= 0) return false;
-  const it = itemDef(id);
-  if (id === "tanzaku") {
-    const slot = firstEmpty(g);
-    if (slot < 0) return false;
-    g.itemStock[id] = n - 1;
-    g.itemT[id] = it.sec;
-    const hero = seedHero(g, GUEST_ID, slot);
-    hero.stack = 2;
-    hero.ephemeral = true;
-    g.slots[slot] = hero;
-    const p = slotXY(slot);
-    burst(g, p.x, p.y, "#d4b0f0", 12, "puff");
-    float(g, p.x, p.y - 26, "短冊", "#d4b0f0");
-    recomputePower(g);
-  } else {
-    g.itemStock[id] = n - 1;
-    g.itemT[id] = it.sec;
-    if (id === "ware") {
-      for (const b of g.stack) {
-        b.hp = Math.max(1, Math.ceil(b.hp * ITEM_WARE));
-        b.maxHp = Math.max(b.hp, Math.ceil(b.maxHp * ITEM_WARE));
-      }
-    }
-    float(g, PIT_X, 120, it.name, "#e8c15a", 1.2);
-  }
-  g.flashBanner = it.name;
-  g.flashT = 1.05;
-  saveMeta(g);
-  if (!g.demo) audio.sfxSelect();
-  return true;
-}
-
 function awardBank(g: Game) {
   if (g.demo || g.lastEarned > 0) return;
   const gain = runBankGain(g.coins, g.wave);
@@ -505,7 +209,7 @@ function awardBank(g: Game) {
   saveMeta(g);
 }
 
-function makeBall(g: Game, spec: { hp: number; pattern: number }, kind: Ball["kind"] = "stack"): Ball {
+export function makeBall(g: Game, spec: { hp: number; pattern: number }, kind: Ball["kind"] = "stack"): Ball {
   const b: Ball = {
     id: nid(g),
     hp: spec.hp,
@@ -572,7 +276,7 @@ function emptySlots(): Array<Hero | null> {
   return Array.from({ length: SLOT_COUNT }, () => null);
 }
 
-function seedHero(g: Game, defId: HeroId, slot: number, buffMul = 1): Hero {
+export function seedHero(g: Game, defId: HeroId, slot: number, buffMul = 1): Hero {
   const swing = g.rng() * Math.PI * 2;
   return {
     id: nid(g),
@@ -595,21 +299,21 @@ function seedHero(g: Game, defId: HeroId, slot: number, buffMul = 1): Hero {
 
 function heroAtk(g: Game, h: Hero): number {
   const d = HEROES[h.defId];
-  return (d.atk + g.shop.base) * levelMul(h.level) * g.atkMul * h.buffMul * g.screamMul;
+  let atk = (d.atk + g.shop.base) * levelMul(h.level) * g.atkMul * h.buffMul * g.screamMul;
+  if ((g.itemT.seijaku ?? 0) > 0) atk *= SEIJAKU_MUL;
+  return atk;
 }
 
 function liveSpd(g: Game) {
-  const burst = (g.itemT.shigure ?? 0) > 0 ? ITEM_SHIGURE : 1;
-  return g.spdMul * g.screamMul * burst;
-}
-
-function itemOn(g: Game, id: ItemId): boolean {
-  return (g.itemT[id] ?? 0) > 0;
+  let spd = g.spdMul * g.screamMul;
+  if ((g.itemT.shigure ?? 0) > 0) spd *= SHIGURE_MUL;
+  if ((g.itemT.seijaku ?? 0) > 0) spd *= SEIJAKU_MUL;
+  return spd;
 }
 
 function tipR(g: Game, h: Hero): number {
-  const base = swingTipR(h);
-  return itemOn(g, "suzu") ? base * ITEM_SUZU : base;
+  const r = swingTipR(h);
+  return (g.itemT.suzu ?? 0) > 0 ? r * SUZU_MUL : r;
 }
 
 export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boolean; playStyle?: PlayStyle; autoMerge?: boolean; voiceOn?: boolean }): Game {
@@ -617,6 +321,8 @@ export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boo
   const meta = loadMeta();
   const g: Game = {
     mode: "title",
+    lesson: null,
+    dangerTold: false,
     demo: !!opts?.demo,
     t: 0,
     wave: 1,
@@ -661,12 +367,10 @@ export function createGame(opts?: { demo?: boolean; muted?: boolean; debug?: boo
     guestStock: meta.guestStock,
     guestLeft: { ...meta.guestStock },
     guestPick: null,
-    itemStock: meta.itemStock,
-    itemT: emptyItemStock(),
-    itemMenu: false,
-    itemPeek: -1,
-    itemTapAt: 0,
-    itemTapRow: -1,
+    guestListOpen: false,
+    itemListOpen: false,
+    assist: false,
+    itemT: emptyItemT(),
     shop: meta.shop,
     lastEarned: 0,
     weaponOptions: [],
@@ -740,8 +444,7 @@ function refillStack(g: Game, cap = STACK_CAP) {
   while (g.stack.length < cap && g.spawnQueue.length) {
     const spec = g.spawnQueue.shift()!;
     const live = temariHpAt(g.summonCount, g.rng, g.wave, g.shop.thin);
-    const hp0 = Math.max(spec.hp, live);
-    const hp = itemOn(g, "ware") ? Math.max(1, Math.ceil(hp0 * ITEM_WARE)) : hp0;
+    const hp = Math.max(spec.hp, live);
     g.stack.push(makeBall(g, { hp, pattern: spec.pattern }));
   }
 }
@@ -768,7 +471,7 @@ function layoutStack(g: Game, snap = false) {
   }
 }
 
-function recomputePower(g: Game) {
+export function recomputePower(g: Game) {
   let p = 0;
   for (const h of g.slots) {
     if (!h) continue;
@@ -780,7 +483,7 @@ function recomputePower(g: Game) {
   g.combatPower = Math.round(p);
 }
 
-function burst(g: Game, x: number, y: number, color: string, n = 8, kind: "spark" | "puff" = "spark") {
+export function burst(g: Game, x: number, y: number, color: string, n = 8, kind: "spark" | "puff" = "spark") {
   for (let i = 0; i < n; i++) {
     const a = g.rng() * Math.PI * 2;
     const s = 40 + g.rng() * 90;
@@ -812,7 +515,7 @@ function slashFx(g: Game, x: number, y: number) {
   });
 }
 
-function float(g: Game, x: number, y: number, text: string, color = "#fff4e0", scale = 1) {
+export function float(g: Game, x: number, y: number, text: string, color = "#fff4e0", scale = 1) {
   g.floats.push({
     x: x + (g.rng() - 0.5) * 10,
     y,
@@ -837,18 +540,19 @@ function popBall(g: Game, b: Ball) {
     if (!g.demo) audio.sfxPop();
     return;
   }
-  let gold = Math.max(1, Math.round((1 + b.maxHp * 0.18) * g.goldMul));
-  if (itemOn(g, "kinpaku")) gold *= 2;
+  const gold = Math.max(1, Math.round((1 + b.maxHp * 0.18) * g.goldMul * ((g.itemT.kinpaku ?? 0) > 0 ? 2 : 1)));
   g.coins += gold;
   float(g, b.x, b.y - 8, `+${gold}`, "#e8c15a");
-  if (itemOn(g, "hanafubuki") && b.kind === "wrap") {
-    g.marks += 1;
-    float(g, b.x, b.y - 22, "+華", "#d4b4f0");
-  }
   noteProcessed(g, b.kind);
   if (b.kind === "wrap") {
-    g.boss.track = Math.min(0.9, g.boss.track + (wrapBackAt(g.shop.back) * (itemOn(g, "kaeshiba") ? ITEM_KAE_KILL : 1)) / BELT_SLOTS);
+    let back = wrapBackAt(g.shop.back);
+    if ((g.itemT.kaeshi ?? 0) > 0) back *= 2;
+    g.boss.track = Math.min(0.9, g.boss.track + back / BELT_SLOTS);
     float(g, g.boss.x, g.boss.y - 36, "バック", "#9ad8e8");
+    if ((g.itemT.fubuki ?? 0) > 0) {
+      g.marks += 1;
+      float(g, b.x, b.y - 26, "+華", "#d4b4f0");
+    }
     if (b.gold) {
       g.goldKills += 1;
       if (g.goldKills === GOLD_FAST_KILLS) g.netaSinceGold = 0;
@@ -858,19 +562,12 @@ function popBall(g: Game, b: Ball) {
   if (!g.demo) audio.sfxPop();
   if (b.kind === "stack" || b.kind === "fall") {
     trySummon(g, { free: true });
+    if ((g.itemT.maneki ?? 0) > 0) trySummon(g, { free: true });
+    if (g.lesson === "break") {
+      g.lesson = "merge";
+      ensureOkikuPair(g);
+    }
   }
-}
-
-function applyBuff(g: Game, id: string) {
-  if (id === "atk") g.atkMul *= 1.15;
-  else if (id === "spd") g.spdMul *= 1.12;
-  else if (id === "gold") g.goldMul *= 1.18;
-  else if (id === "back") g.boss.track = Math.min(0.92, g.boss.track + 0.14);
-  else if (id === "both") {
-    g.atkMul *= 1.08;
-    g.spdMul *= 1.08;
-  }
-  recomputePower(g);
 }
 
 function pickBuffs(g: Game): WeaponOption[] {
@@ -889,6 +586,7 @@ function onGoldPlate(g: Game, b: Ball) {
   burst(g, b.x, b.y, "#ffe28a", 16, "puff");
   float(g, b.x, b.y - 22, "金皿", "#ffe28a", 1.45);
   if (!g.demo) audio.sfxSelect();
+  if (g.lesson) return;
   const picks = pickBuffs(g);
   if (g.demo) {
     applyBuff(g, picks[0]!.id);
@@ -920,16 +618,13 @@ function resolveHit(hp: number, amount: number): HitResult {
   return { applied, hp: next, dead: next <= 0 };
 }
 
-function hurtBall(g: Game, b: Ball, amount: number): HitResult | null {
+export function hurtBall(g: Game, b: Ball, amount: number): HitResult | null {
   if (b.hp <= 0) return null;
   const hit = resolveHit(b.hp, amount);
   b.hp = hit.hp;
   float(g, b.x, b.y, `${Math.round(hit.applied)}`, "#fff8ee");
   burst(g, b.x, b.y, "#fff", 4);
   if (hit.dead) popBall(g, b);
-  else if (itemOn(g, "kaeshiba") && (b.kind === "wrap" || b.kind === "collab")) {
-    g.boss.track = Math.min(0.92, g.boss.track + ITEM_KAE);
-  }
   return hit;
 }
 
@@ -958,6 +653,14 @@ function onBossDown(g: Game) {
   g.shake = 1;
   g.coins += Math.round(12 * g.wave * g.goldMul);
   if (!g.demo) audio.sfxBoss();
+  if (!g.demo) {
+    g.mode = "clear";
+    return;
+  }
+  advanceWave(g);
+}
+
+function advanceWave(g: Game) {
   g.wave += 1;
   saveMeta(g);
   g.boss = {
@@ -973,7 +676,25 @@ function onBossDown(g: Game) {
   g.netaReserve += NETA_RESERVE;
   refillStack(g, g.processed >= 4 ? STACK_CAP : STACK_START);
   if (g.demo) return;
+  g.mode = "playing";
   if (g.routeCount === 0) openRoute(g);
+}
+
+export function continueClear(g: Game) {
+  if (g.mode !== "clear") return;
+  advanceWave(g);
+}
+
+export function cashOutRun(g: Game) {
+  if (g.mode !== "clear" || g.demo || g.lastEarned > 0) return;
+  const gain = Math.max(0, Math.floor(g.coins));
+  g.lastEarned = gain;
+  g.bank += gain;
+  if (g.marks > 0) {
+    g.lastMarks = g.marks;
+    g.markBank += g.marks;
+  }
+  saveMeta(g);
 }
 
 function convertToWrap(g: Game, b: Ball) {
@@ -1025,7 +746,7 @@ function layoutBelt(g: Game, snap = false, dt = 1 / 60) {
   }
 }
 
-function reindexWrap(g: Game) {
+export function reindexWrap(g: Game) {
   for (let i = 0; i < g.wrap.length; i++) {
     g.wrap[i]!.wrapIndex = i;
   }
@@ -1427,11 +1148,11 @@ function stepHeroes(g: Game, dt: number) {
   }
 }
 
-function firstEmpty(g: Game): number {
+export function firstEmpty(g: Game): number {
   return g.slots.findIndex((s) => !s);
 }
 
-function firstEmptyNearBoss(g: Game): number {
+export function firstEmptyNearBoss(g: Game): number {
   let best = -1;
   let bestD = Infinity;
   for (let i = 0; i < SLOT_COUNT; i++) {
@@ -1473,14 +1194,13 @@ export function trySummon(g: Game, opts?: { free?: boolean }): boolean {
   }
   g.summonCount += 1;
   g.summonCost = summonCostAt(g.summonCount);
-  const id = rollSummon(g);
+  const id = g.lesson === "break" ? "okiku" : rollSummon(g);
   g.slots[slot] = seedHero(g, id, slot);
   const p = slotXY(slot);
   burst(g, p.x, p.y, "#e8c15a", 10, "puff");
   if (free) float(g, p.x, p.y - 26, "召喚", "#e8c15a");
-  if (free && (g.twinSummon > 0 || itemOn(g, "utsushi"))) {
-    const extras = g.twinSummon + (itemOn(g, "utsushi") ? 1 : 0);
-    for (let i = 0; i < extras; i++) {
+  if (free && g.twinSummon > 0) {
+    for (let i = 0; i < g.twinSummon; i++) {
       const extra = firstEmpty(g);
       if (extra < 0) break;
       const id2 = rollSummon(g);
@@ -1495,7 +1215,40 @@ export function trySummon(g: Game, opts?: { free?: boolean }): boolean {
   return true;
 }
 
-function tryMergeOrSwap(g: Game, from: number, to: number): boolean {
+export function startLesson(g: Game) {
+  if (g.mode === "title" || g.mode === "fail") return;
+  if (g.mode !== "playing") g.mode = "playing";
+  if (!g.slots.some((h) => h?.defId === "okiku")) {
+    const slot = firstEmpty(g);
+    if (slot >= 0) g.slots[slot] = seedHero(g, "okiku", slot);
+  }
+  g.lesson = "move";
+  g.dangerTold = false;
+}
+
+function armBreakLesson(g: Game) {
+  g.lesson = "break";
+  const b = g.stack[0];
+  if (b && b.hp > 2) b.hp = 2;
+}
+
+function ensureOkikuPair(g: Game) {
+  const levels = new Map<number, number>();
+  for (const h of g.slots) {
+    if (!h || h.defId !== "okiku" || h.level >= 8) continue;
+    levels.set(h.level, (levels.get(h.level) ?? 0) + 1);
+  }
+  for (const n of levels.values()) if (n >= 2) return;
+  const mate = g.slots.find((h) => h && h.defId === "okiku" && h.level < 8);
+  const slot = firstEmpty(g);
+  if (slot < 0) return;
+  const twin = seedHero(g, "okiku", slot);
+  twin.level = mate?.level ?? 1;
+  g.slots[slot] = twin;
+  recomputePower(g);
+}
+
+export function tryMergeOrSwap(g: Game, from: number, to: number): boolean {
   if (from === to) return false;
   const a = g.slots[from];
   const b = g.slots[to];
@@ -1504,6 +1257,7 @@ function tryMergeOrSwap(g: Game, from: number, to: number): boolean {
     a.slot = to;
     g.slots[to] = a;
     g.slots[from] = null;
+    if (g.lesson === "move" && a.defId === "okiku") armBreakLesson(g);
     return true;
   }
   if (a.defId === b.defId && !isGuest(a.defId) && a.level === b.level && a.level < 8) {
@@ -1525,22 +1279,25 @@ function tryMergeOrSwap(g: Game, from: number, to: number): boolean {
       burst(g, p.x, p.y, "#e8c15a", 8, "puff");
       g.justMerged = 0.18;
     }
+    if (g.lesson === "merge" && a.defId === "okiku") g.lesson = null;
+    else if (g.lesson === "move" && a.defId === "okiku") armBreakLesson(g);
     return true;
   }
   a.slot = to;
   b.slot = from;
   g.slots[to] = a;
   g.slots[from] = b;
+  if (g.lesson === "move" && (a.defId === "okiku" || b.defId === "okiku")) armBreakLesson(g);
   return true;
 }
 
-function bumpRank(g: Game, h: Hero) {
+export function bumpRank(g: Game, h: Hero) {
   g.moveSeq += 1;
   h.rank = g.moveSeq;
 }
 
 function tryAutoMerge(g: Game) {
-  if (g.demo || !g.autoMerge || g.shop.auto < 1 || g.drag) return;
+  if (g.lesson || g.demo || !g.autoMerge || g.shop.auto < 1 || g.drag) return;
   const groups = new Map<string, number[]>();
   g.slots.forEach((h, i) => {
     if (!h || h.level >= 8 || isGuest(h.defId)) return;
@@ -1578,105 +1335,6 @@ function tryAutoMerge(g: Game) {
   }
 }
 
-export function slotAt(x: number, y: number): number {
-  let best = -1;
-  let bestD = SLOT_HIT_R;
-  for (let i = 0; i < SLOT_COUNT; i++) {
-    const p = slotXY(i);
-    const d = Math.hypot(x - p.x, y - p.y);
-    if (d <= bestD) {
-      bestD = d;
-      best = i;
-    }
-  }
-  return best;
-}
-
-export function hitBuffCard(x: number, y: number): number {
-  for (let i = 0; i < 3; i++) {
-    const r = buffCardRect(i);
-    if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i;
-  }
-  return -1;
-}
-
-export function hitMute(x: number, y: number): boolean {
-  return Math.hypot(x - 366, y - 812) < 22;
-}
-
-export function onPointerDown(g: Game, x: number, y: number) {
-  if (g.mode === "buff") {
-    const i = hitBuffCard(x, y);
-    const opt = i >= 0 ? g.buffOptions[i] : undefined;
-    if (opt) chooseBuff(g, opt.id);
-    return;
-  }
-  if (g.mode !== "playing") return;
-  if (hitItemButton(x, y)) {
-    g.itemMenu = !g.itemMenu;
-    g.itemPeek = -1;
-    g.itemTapRow = -1;
-    return;
-  }
-  if (g.itemMenu) {
-    if (hitItemClose(x, y) || !hitItemMenu(x, y)) {
-      g.itemMenu = false;
-      g.itemPeek = -1;
-      g.itemTapRow = -1;
-      return;
-    }
-    const row = hitItemRow(x, y);
-    const it = row >= 0 ? ITEMS[row] : undefined;
-    if (!it) return;
-    const now = performance.now();
-    const again = g.itemTapRow === row && now - g.itemTapAt < 400;
-    g.itemTapAt = now;
-    g.itemTapRow = row;
-    g.itemPeek = row;
-    if (!again) return;
-    const active = (g.itemT[it.id] ?? 0) > 0;
-    const n = g.itemStock[it.id] ?? 0;
-    if (!active && n > 0) useItem(g, it.id);
-    else if (!active && n <= 0) buyItem(g, it.id);
-    return;
-  }
-  if (hitMute(x, y)) {
-    g.muted = !g.muted;
-    audio.setMuted(g.muted);
-    return;
-  }
-  if (g.guestPick) {
-    const s = slotAt(x, y);
-    if (s >= 0 && !g.slots[s]) placeGuest(g, s);
-    g.guestPick = null;
-    return;
-  }
-  const s = slotAt(x, y);
-  if (s >= 0 && g.slots[s]) {
-    g.drag = { slot: s, x, y };
-    g.selectedSlot = s;
-  } else {
-    g.selectedSlot = null;
-  }
-}
-
-export function onPointerMove(g: Game, x: number, y: number) {
-  if (!g.drag) return;
-  g.drag.x = x;
-  g.drag.y = y;
-}
-
-export function onPointerUp(g: Game, x: number, y: number) {
-  if (!g.drag) return;
-  const from = g.drag.slot;
-  g.drag = null;
-  const to = slotAt(x, y);
-  if (to < 0) return;
-  if (from !== to) tryMergeOrSwap(g, from, to);
-  const placed = g.slots[to];
-  if (placed) bumpRank(g, placed);
-}
-
 function openWeapon(g: Game) {
   g.weaponCount += 1;
   const pool = [...WEAPON_POOL];
@@ -1699,7 +1357,7 @@ function openRoute(g: Game) {
 }
 
 function maybeEvents(g: Game) {
-  if (g.demo || g.mode !== "playing") return;
+  if (g.demo || g.lesson || g.mode !== "playing") return;
   if (g.routeCount === 0) {
     const low = g.boss.hp / g.boss.maxHp <= routeHpAt(g.shop.path);
     if (low || g.processed >= routeProcessedAt(g.shop.path)) {
@@ -1710,61 +1368,6 @@ function maybeEvents(g: Game) {
   if (g.weaponCount < 3 && g.processed >= weaponAt(g.weaponCount, g.shop.path)) {
     openWeapon(g);
   }
-}
-
-export function chooseWeapon(g: Game, id: string) {
-  if (id === "atk") g.atkMul *= 1.3;
-  if (id === "spd") g.spdMul *= 1.22;
-  if (id === "gold") g.goldMul *= 1.4;
-  if (id === "cheap") g.twinSummon += 1;
-  recomputePower(g);
-  g.mode = "playing";
-  g.flashBanner = null;
-  audio.sfxSelect();
-}
-
-export function chooseBuff(g: Game, id: string) {
-  applyBuff(g, id);
-  g.mode = "playing";
-  g.flashBanner = null;
-  g.buffOptions = [];
-  audio.sfxSelect();
-}
-
-export function chooseRoute(g: Game, optIndex: number) {
-  const opt = g.routeOptions[optIndex];
-  if (!opt) {
-    g.mode = "playing";
-    return;
-  }
-  const fail = opt.failChance > 0 && g.rng() < opt.failChance;
-  if (fail) {
-    g.flashBanner = "失敗";
-    g.flashT = 0.9;
-    for (let i = 0; i < 6; i++) {
-      const spec = { hp: Math.max(3, 2 + g.wave), pattern: i % 5 };
-      const b = makeBall(g, spec, "wrap");
-      g.wrap.push(b);
-    }
-    reindexWrap(g);
-    g.boss.track = Math.max(0.04, g.boss.track - 6 / BELT_SLOTS);
-  } else {
-    if (!g.unlocked.includes(opt.id)) g.unlocked.push(opt.id);
-    const slot = firstEmptyNearBoss(g);
-    if (slot >= 0) {
-      const h = seedHero(g, opt.id, slot, opt.atkMul);
-      g.slots[slot] = h;
-      const p = slotXY(slot);
-      burst(g, p.x, p.y, "#e8c15a", 18, "puff");
-    } else {
-      g.atkMul *= 1 + (opt.atkMul - 1) * 0.25;
-    }
-    g.flashBanner = `${opt.name} 加入`;
-    g.flashT = 0.9;
-  }
-  recomputePower(g);
-  g.mode = "playing";
-  audio.sfxSelect();
 }
 
 function demoBrain(g: Game, dt: number) {
@@ -1798,9 +1401,8 @@ function demoBrain(g: Game, dt: number) {
 export function step(g: Game, dt: number) {
   if (g.voiceOn) g.screamMul = pollVoice(dt);
   else g.screamMul = 1;
-  if ((g.itemT.seijaku ?? 0) > 0) g.screamMul = ITEM_SEIJAKU;
   const held = g.playStyle === "manual" && g.mode === "playing" && (!!g.drag || g.guestPick != null);
-  const simming = ((g.mode === "playing" && !held && !g.itemMenu) || (g.mode === "title" && g.demo));
+  const simming = (g.mode === "playing" && !held) || (g.mode === "title" && g.demo);
   g.t += dt;
   g.shake = Math.max(0, g.shake - dt * 2.4);
   g.justMerged = Math.max(0, g.justMerged - dt);
@@ -1809,6 +1411,7 @@ export function step(g: Game, dt: number) {
     if (g.flashT <= 0) g.flashBanner = null;
   }
   g.boss.hitFlash = Math.max(0, g.boss.hitFlash - dt);
+  if (g.mode === "playing") tickItems(g, dt);
 
   if (g.hitstop > 0) {
     g.hitstop -= dt;
@@ -1820,8 +1423,6 @@ export function step(g: Game, dt: number) {
     stepFx(g, dt);
     return;
   }
-
-  tickItems(g, dt);
 
   if (g.demo && g.mode === "title") demoBrain(g, dt);
 
@@ -1840,8 +1441,15 @@ export function step(g: Game, dt: number) {
   }
 
   const packed = g.wrap.length / BELT_SLOTS;
-  const pace = itemOn(g, "senko") ? 0 : oiranPaceAt(g.shop.slow);
+  const pace = (g.itemT.senko ?? 0) > 0 ? 0 : oiranPaceAt(g.shop.slow);
   g.boss.track -= (0.018 + g.wave * 0.0032 + packed * 0.01) * dt * pace;
+  if (g.lesson && !g.dangerTold && g.boss.track <= DANGER_TRACK) {
+    g.boss.track = DANGER_TRACK * 0.85;
+    g.dangerTold = true;
+    g.mode = "warn";
+    layoutBelt(g, true);
+    return;
+  }
   failIfGoal(g);
   refillBelt(g, dt);
   layoutBelt(g, false, dt);

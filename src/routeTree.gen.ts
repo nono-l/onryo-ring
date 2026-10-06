@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as HowRouteImport } from './routes/how'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as TermsRouteImport } from './routes/terms'
+import { Route as ApiRtcRouteImport } from './routes/api/rtc'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
 const IndexRoute = IndexRouteImport.update({
@@ -35,6 +36,11 @@ const TermsRoute = TermsRouteImport.update({
   path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiRtcRoute = ApiRtcRouteImport.update({
+  id: '/api/rtc',
+  path: '/api/rtc',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -46,6 +52,7 @@ export interface FileRoutesByFullPath {
   '/how': typeof HowRoute
   '/login': typeof LoginRoute
   '/terms': typeof TermsRoute
+  '/api/rtc': typeof ApiRtcRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesByTo {
@@ -53,6 +60,7 @@ export interface FileRoutesByTo {
   '/how': typeof HowRoute
   '/login': typeof LoginRoute
   '/terms': typeof TermsRoute
+  '/api/rtc': typeof ApiRtcRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesById {
@@ -61,14 +69,16 @@ export interface FileRoutesById {
   '/how': typeof HowRoute
   '/login': typeof LoginRoute
   '/terms': typeof TermsRoute
+  '/api/rtc': typeof ApiRtcRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/how' | '/login' | '/terms' | '/api/auth/$'
+  fullPaths: '/' | '/how' | '/login' | '/terms' | '/api/rtc' | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/how' | '/login' | '/terms' | '/api/auth/$'
-  id: '__root__' | '/' | '/how' | '/login' | '/terms' | '/api/auth/$'
+  to: '/' | '/how' | '/login' | '/terms' | '/api/rtc' | '/api/auth/$'
+  id:
+    '__root__' | '/' | '/how' | '/login' | '/terms' | '/api/rtc' | '/api/auth/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -76,6 +86,7 @@ export interface RootRouteChildren {
   HowRoute: typeof HowRoute
   LoginRoute: typeof LoginRoute
   TermsRoute: typeof TermsRoute
+  ApiRtcRoute: typeof ApiRtcRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
 
@@ -109,6 +120,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/rtc': {
+      id: '/api/rtc'
+      path: '/api/rtc'
+      fullPath: '/api/rtc'
+      preLoaderRoute: typeof ApiRtcRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -124,6 +142,7 @@ const rootRouteChildren: RootRouteChildren = {
   HowRoute: HowRoute,
   LoginRoute: LoginRoute,
   TermsRoute: TermsRoute,
+  ApiRtcRoute: ApiRtcRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }
 export const routeTree = rootRouteImport

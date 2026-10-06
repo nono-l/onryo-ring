@@ -1,22 +1,27 @@
-export type HeroId = "okiku" | "mio" | "kuro" | "hakumen" | "takaten" | "shion";
+export type HeroId = "okiku" | "mio" | "kuro" | "hakumen" | "takaten" | "shion" | "monika";
 export type ItemId =
   | "senko"
   | "shigure"
   | "ware"
-  | "utsushi"
   | "tanzaku"
   | "kinpaku"
-  | "hanafubuki"
-  | "kaeshiba"
+  | "fubuki"
+  | "kaeshi"
   | "suzu"
-  | "seijaku";
-export type ItemStock = Record<ItemId, number>;
+  | "seijaku"
+  | "maneki";
+/** 武器昇格の3択。未知の文字列は倍率を掛けず、選択の終了だけ行う。 */
+export type WeaponPickId = "atk" | "spd" | "gold" | "cheap";
+/** 金皿の3択。未知の文字列は倍率を掛けず、選択の終了だけ行う。 */
+export type BuffPickId = "atk" | "spd" | "gold" | "back" | "both";
 export type GuestStock = Partial<Record<HeroId, number>>;
 export type Rarity = "common" | "rare" | "elite";
 export type Role = "melee" | "ranged";
 export type BallKind = "stack" | "fall" | "wrap" | "collab";
 export type PlayStyle = "active" | "manual";
-export type Mode = "title" | "playing" | "paused" | "weapon" | "route" | "buff" | "fail";
+export type Mode = "title" | "playing" | "paused" | "weapon" | "route" | "buff" | "fail" | "clear" | "warn";
+/** 初回の実演。説明文は出さず、操作できたとき次へ進む。 */
+export type LessonStep = "move" | "break" | "merge";
 
 export interface HeroDef {
   id: HeroId;
@@ -29,6 +34,14 @@ export interface HeroDef {
   range: number;
   color: string;
   projectile: string;
+  /** 図鑑の武器名 */
+  weapon: string;
+  blurb: string;
+  /** 武器の長さ。L = reachBase + level * reachPer。その後に振りの倍率を掛ける。 */
+  reachBase: number;
+  reachPer: number;
+  /** 先端の半径。tipBase + level */
+  tipBase: number;
 }
 
 export interface Ball {
@@ -63,8 +76,9 @@ export interface Hero {
   targetY: number;
   buffMul: number;
   rank: number;
-  /** 客神の短冊。時間切れで消す。在庫は消費していない。 */
   ephemeral?: boolean;
+  /** 客が置いた客神。移動できるのはこの本人だけ。 */
+  owner?: string;
 }
 
 export interface Projectile {
@@ -158,6 +172,10 @@ export interface DragState {
 
 export interface Game {
   mode: Mode;
+  /** 実演中だけ。終わったら null。客の写しには載せない。 */
+  lesson: LessonStep | null;
+  /** 実演中に、赤い線の警告を出した。 */
+  dangerTold: boolean;
   demo: boolean;
   t: number;
   wave: number;
@@ -227,12 +245,11 @@ export interface Game {
   guestStock: GuestStock;
   guestLeft: GuestStock;
   guestPick: HeroId | null;
-  itemStock: ItemStock;
-  itemT: ItemStock;
-  /** 挑戦中の札メニュー。開いているあいだ円陣は止める。 */
-  itemMenu: boolean;
-  /** 札メニューで効果を出している行。-1 は未選択。 */
-  itemPeek: number;
-  itemTapAt: number;
-  itemTapRow: number;
+  /** 客席。盤面は主催の写しで、式神そのものは動かさない。 */
+  assist: boolean;
+  /** 右上の華を開いたときだけ客神一覧を出す。常時並べない。 */
+  guestListOpen: boolean;
+  /** 画面下の「札」を開いたときだけ10枚を出す。常時並べない。 */
+  itemListOpen: boolean;
+  itemT: Record<ItemId, number>;
 }

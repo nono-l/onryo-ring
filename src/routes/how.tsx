@@ -1,10 +1,16 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { articleDateHead } from "@/lib/page-date";
+import { PAGE_DATES } from "@/lib/page-dates.generated";
 
 export const Route = createFileRoute("/how")({
   component: HowPage,
-  head: () => ({
-    meta: [{ title: "遊び方 · 怨霊円陣" }],
-  }),
+  head: () => {
+    const dates = articleDateHead(PAGE_DATES["/how"] ?? {});
+    return {
+      meta: [{ title: "遊び方 · 怨霊円陣" }, ...dates.meta],
+      scripts: dates.scripts,
+    };
+  },
 });
 
 function HowPage() {

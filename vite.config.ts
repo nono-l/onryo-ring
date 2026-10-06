@@ -12,6 +12,8 @@ import { nitro } from "nitro/vite";
 import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 // @ts-expect-error JS plugin alongside the TS vite config
 import { appEnvPlugin } from "./scripts/app-env-plugin.mjs";
+// @ts-expect-error JS plugin alongside the TS vite config
+import { isPageSource, stampPageDates } from "./scripts/page-dates.mjs";
 import { isMigrationFile } from "./scripts/migration-plan.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -79,6 +81,23 @@ function pgliteBootstrapPlugin(): Plugin {
         console.error("[app-builder] DB bootstrap failed:", err);
         throw err;
       }
+    },
+  };
+}
+
+function pageDatesPlugin(): Plugin {
+  return {
+    name: "page-dates",
+    buildStart() {
+      stampPageDates();
+    },
+    configureServer(server) {
+      const on = (file: string) => {
+        if (isPageSource(file)) stampPageDates();
+      };
+      server.watcher.on("change", on);
+      server.watcher.on("add", on);
+      server.watcher.on("unlink", on);
     },
   };
 }
@@ -193,6 +212,7 @@ export default defineConfig(({ command, isPreview }) => ({
     "import.meta.env.VITE_BUILD_STAMP": JSON.stringify(buildStampJst()),
   },
   plugins: [
+    pageDatesPlugin(),
     pgliteBootstrapPlugin(),
     // Before tanstackStart so /auth/popup never falls through to the SPA.
     authPopupPlugin(),

@@ -1,11 +1,17 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { GROK_PROVIDERS, authEnabled, signIn } from "@/lib/auth/client";
+import { articleDateHead } from "@/lib/page-date";
+import { PAGE_DATES } from "@/lib/page-dates.generated";
 
 export const Route = createFileRoute("/login")({
   component: Login,
-  head: () => ({
-    meta: [{ title: "ログイン · 怨霊円陣" }],
-  }),
+  head: () => {
+    const dates = articleDateHead(PAGE_DATES["/login"] ?? {});
+    return {
+      meta: [{ title: "ログイン · 怨霊円陣" }, ...dates.meta],
+      scripts: dates.scripts,
+    };
+  },
 });
 
 function Login() {

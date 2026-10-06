@@ -5,13 +5,13 @@
 import {
   BALL_R,
   BELT_SPAN,
+  DANGER_TRACK,
   GOAL_A,
   GUEST_CARD,
   GUEST_HINT,
   GUEST_KINDS,
   guestTrayRect,
   MARK_BADGE,
-  HERO_PROFILES,
   isGuest,
   roleLabel,
   HEROES,
@@ -30,6 +30,8 @@ import {
   COLLAB_R,
   COLLAB_SPAN,
   beltPose,
+  oiranDanger,
+  SUZU_MUL,
   collabPose,
   buffCardRect,
   displayLevel,
@@ -38,16 +40,9 @@ import {
   swingLen,
   swingTip,
   swingTipR,
-  takatenBladeLocal,
   armCount,
-  ITEMS,
-  ITEM_BTN,
-  ITEM_MENU,
-  ITEM_SUZU,
-  itemCloseRect,
-  itemMenuRow,
 } from "./data";
-import type { Ball, Game, Hero } from "./types";
+import type { Ball, Game, Hero, HeroId } from "./types";
 
 export const SPRITES: Record<string, HTMLImageElement> = {};
 export let assetsReady = false;
@@ -63,7 +58,7 @@ function loadImg(src: string): Promise<HTMLImageElement> {
 }
 
 export async function loadAssets(): Promise<void> {
-  const names = ["okiku", "mio", "kuro", "hakumen", "takaten", "oiran", "shion"] as const;
+  const names = [...Object.keys(HEROES), "oiran"];
   const jobs = names
     .filter((n) => !SPRITES[n])
     .map((n) =>
@@ -78,10 +73,12 @@ export async function loadAssets(): Promise<void> {
       }),
     );
   }
-  if (!SPRITES.shionBody) {
+  for (const k of GUEST_KINDS) {
+    const key = `${k.id}Body`;
+    if (SPRITES[key]) continue;
     jobs.push(
-      loadImg("/assets/shion-body.png").then((img) => {
-        SPRITES.shionBody = img;
+      loadImg(`/assets/${k.id}-body.png`).then((img) => {
+        SPRITES[key] = img;
       }),
     );
   }
@@ -544,7 +541,7 @@ function mergeReadyCount(g: Game, h: Hero): number {
 }
 
 function drawSprite(ctx: CanvasRenderingContext2D, h: Hero, facing: number) {
-  const body = h.defId === "shion" ? SPRITES.shionBody : undefined;
+  const body = isGuest(h.defId) ? SPRITES[`${h.defId}Body`] : undefined;
   const img = body && body.complete && body.naturalWidth ? body : SPRITES[h.defId];
   const def = HEROES[h.defId];
   ctx.save();
@@ -590,7 +587,12 @@ function drawWeapon(ctx: CanvasRenderingContext2D, h: Hero, swing = h.swing) {
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  if (h.defId === "okiku") {
+  WEAPONS[h.defId](ctx, lv);
+  ctx.restore();
+}
+
+const WEAPONS: Record<HeroId, (ctx: CanvasRenderingContext2D, lv: number) => void> = {
+  okiku(ctx, lv) {
     ctx.fillStyle = lv >= 3 ? "#6a3a12" : "#5a3214";
     ctx.fillRect(-2.6, 6, 5.2, 26);
     ctx.strokeStyle = "#2a1608";
@@ -619,7 +621,8 @@ function drawWeapon(ctx: CanvasRenderingContext2D, h: Hero, swing = h.swing) {
     ctx.ellipse(-3, 35, 4, 2.4, -0.4, 0, Math.PI * 2);
     ctx.fillStyle = "rgba(255,220,180,0.35)";
     ctx.fill();
-  } else if (h.defId === "kuro") {
+  },
+  kuro(ctx, lv) {
     ctx.fillStyle = "#2a1814";
     ctx.fillRect(-1.8, 8, 3.6, 16 + (lv - 1) * 4);
     ctx.beginPath();
@@ -644,16 +647,16 @@ function drawWeapon(ctx: CanvasRenderingContext2D, h: Hero, swing = h.swing) {
       ctx.strokeStyle = "#ffd0c0";
       ctx.stroke();
     }
-  } else if (h.defId === "takaten") {
+  },
+  takaten(ctx, lv) {
     ctx.fillStyle = lv >= 3 ? "#f0ece4" : "#d8d0c4";
     ctx.fillRect(-2.2, 4, 4.4, 34 + (lv - 1) * 4);
     ctx.strokeStyle = "#8a8074";
     ctx.lineWidth = 1;
     ctx.strokeRect(-2.2, 4, 4.4, 34 + (lv - 1) * 4);
-    const blade = takatenBladeLocal(lv);
     ctx.beginPath();
     ctx.moveTo(2, 34);
-    ctx.quadraticCurveTo(28 + lv * 4, 28, blade.x, blade.y);
+    ctx.quadraticCurveTo(28 + lv * 4, 28, 26 + lv * 3, 48 + lv * 4);
     ctx.quadraticCurveTo(18, 40, 2, 42);
     ctx.closePath();
     ctx.fillStyle = lv >= 3 ? "#b8ecff" : "#7ec8e0";
@@ -669,7 +672,8 @@ function drawWeapon(ctx: CanvasRenderingContext2D, h: Hero, swing = h.swing) {
       ctx.lineWidth = 1;
       ctx.stroke();
     }
-  } else if (h.defId === "mio") {
+  },
+  mio(ctx, lv) {
     ctx.fillStyle = "#e8e0d4";
     ctx.fillRect(-2, 6, 4, 32 + (lv - 1) * 4);
     ctx.fillStyle = lv >= 3 ? "#c8f0ff" : "#9ad8e8";
@@ -691,7 +695,8 @@ function drawWeapon(ctx: CanvasRenderingContext2D, h: Hero, swing = h.swing) {
       ctx.strokeStyle = lv >= 3 ? "#d4b45a" : "#c45a4a";
       ctx.strokeRect(-5, 30, 10, 7);
     }
-  } else if (h.defId === "shion") {
+  },
+  shion(ctx, lv) {
     ctx.fillStyle = lv >= 3 ? "#6a3a78" : "#4a2a58";
     ctx.fillRect(-1.7, 6, 3.4, 26 + lv * 2);
     ctx.strokeStyle = "#2a1830";
@@ -716,7 +721,34 @@ function drawWeapon(ctx: CanvasRenderingContext2D, h: Hero, swing = h.swing) {
     ctx.arc(0, tip, 2.4, 0, Math.PI * 2);
     ctx.fillStyle = "#fff4c8";
     ctx.fill();
-  } else {
+  },
+  monika(ctx, lv) {
+    ctx.strokeStyle = "#8ec4ea";
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(0, 6);
+    ctx.lineTo(0, 34 + lv * 2);
+    ctx.stroke();
+    const tip = 36 + lv * 2;
+    ctx.fillStyle = lv >= 3 ? "#f4fbff" : "#d6ecff";
+    ctx.beginPath();
+    ctx.ellipse(-7, tip, 6 + lv * 0.4, 3.2, -0.5, 0, Math.PI * 2);
+    ctx.ellipse(7, tip, 6 + lv * 0.4, 3.2, 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#9ec8ea";
+    ctx.beginPath();
+    ctx.arc(0, tip, 2.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#f7fbff";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, tip);
+    ctx.lineTo(-3, tip + 10 + lv);
+    ctx.moveTo(0, tip);
+    ctx.lineTo(3, tip + 12 + lv);
+    ctx.stroke();
+  },
+  hakumen(ctx, lv) {
     ctx.fillStyle = "#c8b8d8";
     ctx.fillRect(-2.2, 5, 4.4, 34 + (lv - 1) * 3);
     ctx.beginPath();
@@ -734,10 +766,8 @@ function drawWeapon(ctx: CanvasRenderingContext2D, h: Hero, swing = h.swing) {
       ctx.lineWidth = 1.2;
       ctx.stroke();
     }
-  }
-
-  ctx.restore();
-}
+  },
+};
 
 function drawHero(ctx: CanvasRenderingContext2D, g: Game, h: Hero, ox: number, oy: number, ghost = false) {
   const bob = Math.sin(g.t * 5 + h.slot) * 1.2;
@@ -762,9 +792,8 @@ function drawHero(ctx: CanvasRenderingContext2D, g: Game, h: Hero, ox: number, o
     ctx.setLineDash([]);
     for (let i = 0; i < n; i++) {
       const tip = swingTip(h, ox, oy, i, n);
-      const reach = swingTipR(h) * ((g.itemT.suzu ?? 0) > 0 ? ITEM_SUZU : 1);
       ctx.beginPath();
-      ctx.arc(tip.x, tip.y, reach, 0, Math.PI * 2);
+      ctx.arc(tip.x, tip.y, swingTipR(h) * ((g.itemT.suzu ?? 0) > 0 ? SUZU_MUL : 1), 0, Math.PI * 2);
       ctx.fillStyle = "rgba(232,193,90,0.22)";
       ctx.fill();
       ctx.strokeStyle = "rgba(255,236,160,0.7)";
@@ -773,14 +802,10 @@ function drawHero(ctx: CanvasRenderingContext2D, g: Game, h: Hero, ox: number, o
     }
   }
 
-  if (h.stack >= 2 && !ghost) {
+  if (h.stack >= 2 && !ghost && !isGuest(h.defId)) {
     ctx.save();
     ctx.globalAlpha = 0.7;
     ctx.translate(ox - 9 * h.facing, oy + bob + 3);
-    if (isGuest(h.defId)) {
-      const big = (SLOT_R / 27) * 1.6;
-      ctx.scale(big, big);
-    }
     drawSprite(ctx, h, h.facing);
     ctx.restore();
   }
@@ -866,13 +891,6 @@ function drawHitboxes(ctx: CanvasRenderingContext2D, g: Game) {
   for (const b of g.wrap) ring(b.x, b.y, WRAP_ORB_R, "rgba(255,180,40,0.95)");
   for (const b of g.collab) ring(b.x, b.y, COLLAB_ORB_R, "rgba(180,120,255,0.95)");
   ring(g.boss.x, g.boss.y - 10, 26, "rgba(255,60,70,0.95)");
-  if (g.mode === "playing") {
-    for (let i = 0; i < GUEST_KINDS.length; i++) {
-      const r = guestTrayRect(i);
-      ctx.strokeStyle = "rgba(200,160,232,0.95)";
-      ctx.strokeRect(r.x, r.y, r.w, r.h);
-    }
-  }
 
   for (let i = 0; i < SLOT_COUNT; i++) {
     const p = slotXY(i);
@@ -886,13 +904,12 @@ function drawHitboxes(ctx: CanvasRenderingContext2D, g: Game) {
       ring(p.x, p.y, len, "rgba(50,255,140,0.7)", true);
       for (let i = 0; i < n; i++) {
         const tip = swingTip(h, p.x, p.y, i, n);
-        const reach = swingTipR(h) * ((g.itemT.suzu ?? 0) > 0 ? ITEM_SUZU : 1);
         ctx.beginPath();
         ctx.moveTo(p.x, p.y);
         ctx.lineTo(tip.x, tip.y);
         ctx.strokeStyle = "rgba(50,255,140,0.95)";
         ctx.stroke();
-        ring(tip.x, tip.y, reach, "rgba(50,255,140,0.95)");
+        ring(tip.x, tip.y, swingTipR(h) * ((g.itemT.suzu ?? 0) > 0 ? SUZU_MUL : 1), "rgba(50,255,140,0.95)");
       }
     } else {
       ring(p.x, p.y, def.range, "rgba(80,200,255,0.75)", true);
@@ -1021,7 +1038,6 @@ function drawGuestCard(ctx: CanvasRenderingContext2D, g: Game) {
   if (!id) return;
   const r = GUEST_CARD;
   const d = HEROES[id];
-  const profile = HERO_PROFILES[id];
   const atk = d.atk + g.shop.base;
   ctx.save();
   ctx.shadowColor = "rgba(200,150,240,0.55)";
@@ -1068,7 +1084,7 @@ function drawGuestCard(ctx: CanvasRenderingContext2D, g: Game) {
   ctx.fillStyle = "#e8c15a";
   ctx.fillText(`${d.title}　${roleLabel(d.role)}`, tx, r.y + 42);
   ctx.fillStyle = "#d8c8e8";
-  ctx.fillText(profile.weapon, tx, r.y + 58);
+  ctx.fillText(d.weapon, tx, r.y + 58);
   ctx.fillStyle = "#f0e6d4";
   ctx.font = '700 10px "Zen Kaku Gothic New", sans-serif';
   ctx.fillText(`攻撃 ${atk}　間隔 ${d.interval.toFixed(2)}秒`, tx, r.y + 74);
@@ -1076,137 +1092,11 @@ function drawGuestCard(ctx: CanvasRenderingContext2D, g: Game) {
 
   ctx.font = '700 10px "Zen Kaku Gothic New", sans-serif';
   ctx.fillStyle = "rgba(232,212,248,0.92)";
-  ctx.fillText(profile.blurb, r.x + 12, r.y + r.h - 28);
+  ctx.fillText(d.blurb, r.x + 12, r.y + r.h - 28);
   const pulse = 0.72 + Math.sin(g.t * 5) * 0.28;
   ctx.fillStyle = `rgba(232,193,90,${pulse.toFixed(3)})`;
   ctx.fillText(GUEST_HINT, r.x + 12, r.y + r.h - 12);
   ctx.restore();
-}
-
-function drawItemShop(ctx: CanvasRenderingContext2D, g: Game) {
-  if (g.mode !== "playing" && g.mode !== "paused") return;
-  let live = 0;
-  for (const it of ITEMS) if ((g.itemT[it.id] ?? 0) > 0) live += 1;
-  const b = ITEM_BTN;
-  ctx.save();
-  ctx.beginPath();
-  ctx.roundRect(b.x, b.y, b.w, b.h, 10);
-  ctx.fillStyle = g.itemMenu ? "rgba(48,36,18,0.96)" : "rgba(18,14,10,0.88)";
-  ctx.fill();
-  ctx.strokeStyle = live > 0 || g.itemMenu ? "#e8c15a" : "rgba(232,193,90,0.55)";
-  ctx.lineWidth = 1.6;
-  ctx.stroke();
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = '800 15px "Zen Kaku Gothic New", sans-serif';
-  ctx.fillStyle = "#f4e6c0";
-  ctx.fillText(live > 0 ? `札${live}` : "札", b.x + b.w / 2, b.y + b.h / 2 + 1);
-  ctx.restore();
-  if (!g.itemMenu) return;
-
-  const m = ITEM_MENU;
-  ctx.save();
-  ctx.fillStyle = "rgba(10,8,6,0.55)";
-  ctx.fillRect(0, 0, VW, VH);
-  ctx.beginPath();
-  ctx.roundRect(m.x, m.y, m.w, m.h, 16);
-  ctx.fillStyle = "rgba(22,16,14,0.96)";
-  ctx.fill();
-  ctx.strokeStyle = "rgba(232,193,90,0.55)";
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.font = '800 16px "Zen Kaku Gothic New", sans-serif';
-  ctx.fillStyle = "#e8c15a";
-  ctx.fillText(`札　所持 ${g.bank}両`, m.x + 16, m.y + 24);
-  const c = itemCloseRect();
-  ctx.beginPath();
-  ctx.roundRect(c.x, c.y, c.w, c.h, 8);
-  ctx.fillStyle = "rgba(232,193,90,0.16)";
-  ctx.fill();
-  ctx.textAlign = "center";
-  ctx.font = '700 12px "Zen Kaku Gothic New", sans-serif';
-  ctx.fillStyle = "#f4e6c0";
-  ctx.fillText("閉じる", c.x + c.w / 2, c.y + c.h / 2 + 1);
-
-  for (let i = 0; i < ITEMS.length; i++) {
-    const it = ITEMS[i]!;
-    const r = itemMenuRow(i);
-    const left = g.itemT[it.id] ?? 0;
-    const on = left > 0;
-    const n = g.itemStock[it.id] ?? 0;
-    const afford = g.bank >= it.cost;
-    ctx.beginPath();
-    ctx.roundRect(r.x, r.y, r.w, r.h, 8);
-    ctx.fillStyle = on ? "rgba(48,36,18,0.95)" : "rgba(32,24,20,0.92)";
-    ctx.fill();
-    ctx.strokeStyle = g.itemPeek === i ? "#e8c15a" : on ? "#e8c15a" : n > 0 || afford ? "rgba(232,193,90,0.4)" : "rgba(232,193,90,0.16)";
-    ctx.stroke();
-    ctx.textAlign = "left";
-    ctx.font = '800 13px "Zen Kaku Gothic New", sans-serif';
-    ctx.fillStyle = "#f4e6c0";
-    ctx.fillText(it.short, r.x + 8, r.y + 15);
-    ctx.font = '600 10px "Zen Kaku Gothic New", sans-serif';
-    ctx.fillStyle = "#c8b898";
-    ctx.fillText(`${it.sec}秒`, r.x + 58, r.y + 15);
-    ctx.textAlign = "right";
-    ctx.font = '800 12px "Zen Kaku Gothic New", sans-serif';
-    ctx.fillStyle = on ? "#e8c15a" : n > 0 ? "#f4e6c0" : afford ? "#d4b4f0" : "#6a6258";
-    const label = on ? `${Math.ceil(left)}秒` : n > 0 ? `使う ${n}` : `${it.cost}両`;
-    ctx.fillText(label, r.x + r.w - 8, r.y + r.h / 2 + 1);
-  }
-  const peek = g.itemPeek >= 0 ? ITEMS[g.itemPeek] : undefined;
-  if (peek) {
-    const box = { x: m.x + 10, y: m.y + 46 + ITEMS.length * 40, w: m.w - 20, h: 78 };
-    ctx.beginPath();
-    ctx.roundRect(box.x, box.y, box.w, box.h, 8);
-    ctx.fillStyle = "rgba(48,36,18,0.92)";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(232,193,90,0.45)";
-    ctx.stroke();
-    ctx.textAlign = "left";
-    ctx.font = '800 12px "Zen Kaku Gothic New", sans-serif';
-    ctx.fillStyle = "#e8c15a";
-    const n = g.itemStock[peek.id] ?? 0;
-    const on = (g.itemT[peek.id] ?? 0) > 0;
-    const hint = on ? "効いている" : n > 0 ? "もう一度で使う" : "もう一度で買う";
-    ctx.fillText(`${peek.name}　${hint}`, box.x + 8, box.y + 16);
-    ctx.font = '600 11px "Zen Kaku Gothic New", sans-serif';
-    ctx.fillStyle = "#f0e6d4";
-    const lines = wrapItemText(ctx, peek.desc, box.w - 16);
-    lines.forEach((line, i) => ctx.fillText(line, box.x + 8, box.y + 36 + i * 16));
-  }
-  ctx.restore();
-  const btn = ITEM_BTN;
-  ctx.save();
-  ctx.beginPath();
-  ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 10);
-  ctx.fillStyle = "rgba(48,36,18,0.96)";
-  ctx.fill();
-  ctx.strokeStyle = "#e8c15a";
-  ctx.lineWidth = 1.6;
-  ctx.stroke();
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = '800 15px "Zen Kaku Gothic New", sans-serif';
-  ctx.fillStyle = "#f4e6c0";
-  ctx.fillText("札", btn.x + btn.w / 2, btn.y + btn.h / 2 + 1);
-  ctx.restore();
-}
-
-function wrapItemText(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
-  const lines: string[] = [];
-  let line = "";
-  for (const ch of text) {
-    const trial = line + ch;
-    if (ctx.measureText(trial).width > maxW && line) {
-      lines.push(line);
-      line = ch;
-    } else line = trial;
-  }
-  if (line) lines.push(line);
-  return lines.slice(0, 2);
 }
 
 function drawHud(ctx: CanvasRenderingContext2D, g: Game) {
@@ -1254,6 +1144,30 @@ function drawHud(ctx: CanvasRenderingContext2D, g: Game) {
   ctx.restore();
 }
 
+function drawOiranDanger(ctx: CanvasRenderingContext2D, g: Game) {
+  const heat = oiranDanger(g.boss.track);
+  if (heat <= 0) return;
+  if (g.mode !== "playing" && g.mode !== "paused" && g.mode !== "warn") return;
+  const pulse = 0.45 + 0.55 * Math.sin(g.t * (5 + heat * 7));
+  const alpha = 0.28 + heat * 0.62 * (0.5 + 0.5 * pulse);
+  const far = GOAL_A - DANGER_TRACK * BELT_SPAN;
+  ctx.save();
+  ctx.strokeStyle = `rgba(196, 42, 36, ${alpha.toFixed(3)})`;
+  ctx.lineWidth = 26;
+  ctx.lineCap = "butt";
+  ctx.beginPath();
+  ctx.arc(PIT_X, PIT_Y, WRAP_R, GOAL_A, far, true);
+  ctx.stroke();
+  const goal = beltPose(0);
+  ctx.translate(goal.x, goal.y);
+  ctx.rotate(goal.a + Math.PI / 2);
+  ctx.strokeStyle = `rgba(255, 120, 96, ${Math.min(1, alpha + 0.25).toFixed(3)})`;
+  ctx.lineWidth = 2.4;
+  ctx.strokeRect(-26, -32, 52, 28);
+  ctx.restore();
+  outlined(ctx, "花魁が近い", VW / 2, 96, "#ffb0a4", 20);
+}
+
 function coverImage(ctx: CanvasRenderingContext2D, img: HTMLImageElement, w: number, h: number) {
   const ir = img.width / img.height;
   const cr = w / h;
@@ -1269,6 +1183,84 @@ function coverImage(ctx: CanvasRenderingContext2D, img: HTMLImageElement, w: num
     dy = (h - dh) / 2;
   }
   ctx.drawImage(img, dx, dy, dw, dh);
+}
+
+function lessonRing(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, t: number) {
+  const a = 0.4 + 0.45 * Math.sin(t * 5);
+  ctx.save();
+  ctx.strokeStyle = `rgba(232,193,90,${a.toFixed(3)})`;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(x, y, r + 3 + Math.sin(t * 5) * 2, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function lessonReachSlot(g: Game): number {
+  const ball = g.stack[0];
+  if (!ball || ball.hp <= 0) return -1;
+  const who = g.slots.find((h) => h?.defId === "okiku");
+  const len = swingLen(who ?? { defId: "okiku", level: 1 });
+  const band = swingTipR(who ?? { defId: "okiku", level: 1 }) + BALL_R;
+  let best = -1;
+  let bestErr = 1e12;
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    if (g.slots[i]) continue;
+    const p = slotXY(i);
+    const d = Math.hypot(p.x - ball.x, p.y - ball.y);
+    if (d > len + band || d < Math.max(0, len - band)) continue;
+    const err = Math.abs(d - len);
+    if (err < bestErr) {
+      bestErr = err;
+      best = i;
+    }
+  }
+  return best;
+}
+
+function okikuReachesFront(g: Game): boolean {
+  const ball = g.stack[0];
+  if (!ball || ball.hp <= 0) return false;
+  for (const h of g.slots) {
+    if (!h || h.defId !== "okiku") continue;
+    const p = slotXY(h.slot);
+    const band = swingLen(h) + swingTipR(h) + BALL_R;
+    if (Math.hypot(p.x - ball.x, p.y - ball.y) <= band) return true;
+  }
+  return false;
+}
+
+function drawLesson(ctx: CanvasRenderingContext2D, g: Game) {
+  if (!g.lesson || g.mode !== "playing") return;
+  if (g.lesson === "move" || (g.lesson === "break" && !okikuReachesFront(g))) {
+    const slot = lessonReachSlot(g);
+    if (slot >= 0) {
+      const p = slotXY(slot);
+      lessonRing(ctx, p.x, p.y, SLOT_R, g.t);
+    }
+    for (let i = 0; i < SLOT_COUNT; i++) {
+      const h = g.slots[i];
+      if (!h || h.defId !== "okiku") continue;
+      if (g.drag?.slot === i) continue;
+      const p = slotXY(i);
+      lessonRing(ctx, p.x, p.y, SLOT_R + 2, g.t);
+    }
+  }
+  if (g.lesson === "break") {
+    const ball = g.stack[0];
+    if (ball && ball.hp > 0) lessonRing(ctx, ball.x, ball.y, BALL_R, g.t);
+  }
+  if (g.lesson === "merge") {
+    const mate = g.slots.find((h) => h && h.defId === "okiku" && h.level < 8);
+    if (!mate) return;
+    for (let i = 0; i < SLOT_COUNT; i++) {
+      const h = g.slots[i];
+      if (!h || h.defId !== "okiku" || h.level !== mate.level) continue;
+      if (g.drag?.slot === i) continue;
+      const p = slotXY(i);
+      lessonRing(ctx, p.x, p.y, SLOT_R + 2, g.t);
+    }
+  }
 }
 
 export function draw(ctx: CanvasRenderingContext2D, g: Game) {
@@ -1449,11 +1441,9 @@ export function draw(ctx: CanvasRenderingContext2D, g: Game) {
     ctx.globalAlpha = 1;
   }
 
+  drawLesson(ctx, g);
   drawHud(ctx, g);
-  if (g.mode === "playing" || g.mode === "paused") {
-    if (g.guestPick) drawGuestCard(ctx, g);
-    drawItemShop(ctx, g);
-  }
+  drawOiranDanger(ctx, g);
   if (g.debug) drawHitboxes(ctx, g);
   if (g.mode === "buff") drawBuffMenu(ctx, g);
 

@@ -1,10 +1,16 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { articleDateHead } from "@/lib/page-date";
+import { PAGE_DATES } from "@/lib/page-dates.generated";
 
 export const Route = createFileRoute("/terms")({
   component: TermsPage,
-  head: () => ({
-    meta: [{ title: "配信規約 / プレイポリシー · 怨霊円陣" }],
-  }),
+  head: () => {
+    const dates = articleDateHead(PAGE_DATES["/terms"] ?? {});
+    return {
+      meta: [{ title: "配信規約 / プレイポリシー · 怨霊円陣" }, ...dates.meta],
+      scripts: dates.scripts,
+    };
+  },
 });
 
 function TermsPage() {

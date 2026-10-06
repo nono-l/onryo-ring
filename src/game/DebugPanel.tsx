@@ -1,9 +1,11 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Game, HeroId } from "./types";
 import type { DebugField } from "./sim";
-import { debugNudge, debugOpenBuff, debugOpenRoute, debugOpenWeapon, debugUnlockAll, nudgeGuest, setAutoMerge, setDebugMode, setPlayStyle, setVoiceOn } from "./sim";
+import { debugNudge, debugOpenBuff, debugOpenRoute, debugOpenWeapon, debugSummon, debugUnlockAll } from "./sim";
+import { nudgeGuest } from "./guests";
+import { setAutoMerge, setDebugMode, setPlayStyle, setVoiceOn } from "./persist";
 import { startVoice, stopVoice, voiceStatus } from "./mic";
-import { GUEST_KINDS, HEROES, HERO_PROFILES, ROSTER_IDS, isGuest, roleLabel } from "./data";
+import { GUEST_KINDS, HEROES, ROSTER_IDS, displayLevel, isGuest, roleLabel } from "./data";
 
 const ROWS: Array<{ id: DebugField; label: string; fmt: (g: Game) => string }> = [
   { id: "bank", label: "所持両", fmt: (g) => String(g.bank) },
@@ -105,18 +107,17 @@ export function HeroCard({
   inPanel?: boolean;
 }) {
   const d = HEROES[id];
-  const p = HERO_PROFILES[id];
   return (
     <div className={`guest-card${inPanel ? " in-panel" : ""}${isGuest(id) ? "" : " roster"}`}>
       <img src={`/assets/${id}.png`} alt="" width={72} height={72} />
       <div className="guest-copy">
         <p className="guest-name">{d.name}</p>
         <p className="guest-title">{d.title}　{roleLabel(d.role)}</p>
-        <p className="guest-weapon">{p.weapon}</p>
+        <p className="guest-weapon">{d.weapon}</p>
         <p className="guest-stat">
           攻撃 {d.atk + g.shop.base}　間隔 {d.interval.toFixed(2)}秒　射程 {d.range}
         </p>
-        <p className="guest-blurb">{p.blurb}</p>
+        <p className="guest-blurb">{d.blurb}</p>
         {hint ? <p className="guest-hint">{hint}</p> : null}
       </div>
     </div>
@@ -127,10 +128,18 @@ export function SettingsPanel({
   g,
   onClose,
   onChange,
+  tutorialOn,
+  tutorialMode,
+  onTutorial,
+  onReplayTutorial,
 }: {
   g: Game;
   onClose: () => void;
   onChange: () => void;
+  tutorialOn: boolean;
+  tutorialMode: "once" | "on" | "off";
+  onTutorial: (on: boolean) => void;
+  onReplayTutorial: () => void;
 }) {
   const [tab, setTab] = useState<SettingsTab>("play");
   const [debugTab, setDebugTab] = useState<DebugTab>("fight");
@@ -228,6 +237,33 @@ export function SettingsPanel({
                     ? "叫んでいるあいだ、大きさで最大3倍、声が高いほどさらに最大10倍。合わせて最大30倍。"
                     : "マイクは使わない。"}
               </p>
+              <p className="shop-hint stagger">チュートリアルを表示する</p>
+              <div className="play-style stagger">
+                <button
+                  type="button"
+                  className={`debug-switch${tutorialOn ? " on" : ""}`}
+                  onClick={() => onTutorial(true)}
+                >
+                  ON
+                </button>
+                <button
+                  type="button"
+                  className={`debug-switch${!tutorialOn ? " on" : ""}`}
+                  onClick={() => onTutorial(false)}
+                >
+                  OFF
+                </button>
+              </div>
+              <p className="shop-hint stagger">
+                {tutorialMode === "on"
+                  ? "挑戦を始めるたびに、動かしながら出る。"
+                  : tutorialMode === "once"
+                    ? "次の挑戦で一度、動かしながら出る。終わるとOFFになる。"
+                    : "開始時には出さない。"}
+              </p>
+              <button type="button" className="ghost-btn stagger" onClick={onReplayTutorial}>
+                最初から見る
+              </button>
               {g.shop.auto >= 1 && (
                 <>
                   <p className="shop-hint stagger">自動重ね</p>
@@ -396,65 +432,80 @@ export function SettingsPanel({
   );
 }
 
-export function CodexPanel({ g, onClose }: { g: Game; onClose: () => void }) {
-  const [face, setFace] = useState<HeroId>("okiku");
-  return (
-    <div className="overlay-scrim is-shop">
-      <div className="overlay-panel enter shop-panel">
-        <div className="shop-head">
-          <div className="ribbon stagger">図鑑</div>
-          <p className="shop-hint stagger">顔を選ぶと、肩書と性能が出る。</p>
-        </div>
-        <div className="shop-scroll">
-          <div className="hero-faces stagger">
-            {ROSTER_IDS.map((id) => (
-              <button
-                key={id}
-                type="button"
-                className={`hero-face${face === id ? " on" : ""}`}
-                onClick={() => setFace(id)}
-              >
-                <img src={`/assets/${id}.png`} alt="" width={48} height={48} />
-                <span>{HEROES[id].name}</span>
-              </button>
-            ))}
-          </div>
-          <HeroCard g={g} id={face} inPanel />
-        </div>
-        <div className="shop-foot">
-          <button type="button" className="ghost-btn stagger" onClick={onClose}>
-            閉じる
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+type DockEdge = "left" | "right" | "top" | "bottom";
+
+function dockEdge(el: HTMLElement, stage: HTMLElement, x: number, y: number): DockEdge | null {
+  const left = el.offsetLeft + x;
+  const top = el.offsetTop + y;
+  const gaps: Array<{ edge: DockEdge; g: number }> = [
+    { edge: "left", g: left },
+    { edge: "right", g: stage.clientWidth - (left + el.offsetWidth) },
+    { edge: "top", g: top },
+    { edge: "bottom", g: stage.clientHeight - (top + el.offsetHeight) },
+  ];
+  const near = gaps.filter((item) => item.g <= 14).sort((a, b) => a.g - b.g)[0];
+  return near?.edge ?? null;
 }
 
 export function DebugDock({ g, onChange }: { g: Game; onChange: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x: 0, y: 0 });
+  const posRef = useRef(pos);
+  posRef.current = pos;
+  const [tab, setTab] = useState<"live" | "summon">("live");
+  const [who, setWho] = useState<HeroId>("okiku");
+  const [lv, setLv] = useState(1);
+  const [note, setNote] = useState("");
+  const [mini, setMini] = useState(false);
+  const [edge, setEdge] = useState<DockEdge>("right");
   const drag = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
-  const moved = useRef(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    const stage = el?.offsetParent as HTMLElement | null;
+    if (!el || !stage) return;
+    const pad = 4;
+    let x = posRef.current.x;
+    let y = posRef.current.y;
+    if (mini) {
+      if (edge === "left") x = pad - el.offsetLeft;
+      if (edge === "right") x = stage.clientWidth - pad - el.offsetWidth - el.offsetLeft;
+      if (edge === "top") y = pad - el.offsetTop;
+      if (edge === "bottom") y = stage.clientHeight - pad - el.offsetHeight - el.offsetTop;
+    }
+    const maxX = stage.clientWidth - el.offsetWidth - el.offsetLeft;
+    const minX = -el.offsetLeft;
+    const maxY = stage.clientHeight - el.offsetHeight - el.offsetTop;
+    const minY = -el.offsetTop;
+    const next = {
+      x: Math.min(maxX, Math.max(minX, x)),
+      y: Math.min(maxY, Math.max(minY, y)),
+    };
+    if (next.x === posRef.current.x && next.y === posRef.current.y) return;
+    posRef.current = next;
+    setPos(next);
+  }, [mini, edge]);
+
   if (!g.debug) return null;
 
   const nudge = (id: DebugField, dir: 1 | -1) => {
-    if (moved.current) {
-      moved.current = false;
-      return;
-    }
     debugNudge(g, id, dir);
+    onChange();
+  };
+  const summon = () => {
+    const ok = debugSummon(g, who, lv);
+    setNote(ok ? `${HEROES[who].name} Lv${displayLevel(lv)}` : "空きがない");
     onChange();
   };
 
   return (
     <div
       ref={ref}
-      className="debug-dock"
+      className={`debug-dock${mini ? " is-mini" : ""}`}
       style={{ transform: `translate(${pos.x}px, ${pos.y}px)` }}
       onPointerDown={(e) => {
+        if ((e.target as HTMLElement).closest("button")) return;
         e.stopPropagation();
-        moved.current = false;
         drag.current = { px: e.clientX, py: e.clientY, x: pos.x, y: pos.y };
         e.currentTarget.setPointerCapture(e.pointerId);
       }}
@@ -463,8 +514,7 @@ export function DebugDock({ g, onChange }: { g: Game; onChange: () => void }) {
         if (!d) return;
         const dx = e.clientX - d.px;
         const dy = e.clientY - d.py;
-        if (Math.hypot(dx, dy) > 5) moved.current = true;
-        if (!moved.current) return;
+        if (Math.hypot(dx, dy) <= 5) return;
         const el = ref.current;
         const stage = el?.offsetParent as HTMLElement | null;
         let x = d.x + dx;
@@ -473,23 +523,86 @@ export function DebugDock({ g, onChange }: { g: Game; onChange: () => void }) {
           x = Math.min(stage.clientWidth - el.offsetWidth - el.offsetLeft, Math.max(-el.offsetLeft, x));
           y = Math.min(stage.clientHeight - el.offsetHeight - el.offsetTop, Math.max(-el.offsetTop, y));
         }
+        posRef.current = { x, y };
         setPos({ x, y });
       }}
-      onPointerUp={() => {
+      onPointerUp={(e) => {
+        const d = drag.current;
         drag.current = null;
+        if (!d) return;
+        const moved = Math.hypot(e.clientX - d.px, e.clientY - d.py) > 5;
+        if (!moved) {
+          if (mini) setMini(false);
+          return;
+        }
+        const el = ref.current;
+        const stage = el?.offsetParent as HTMLElement | null;
+        const hit = el && stage ? dockEdge(el, stage, posRef.current.x, posRef.current.y) : null;
+        if (hit) {
+          setEdge(hit);
+          setMini(true);
+        } else {
+          setMini(false);
+        }
       }}
       onPointerCancel={() => {
         drag.current = null;
       }}
     >
-      {LIVE.map((row) => (
-        <div key={row.id} className="debug-dock-row">
-          <span>{row.label}</span>
-          <button type="button" onClick={() => nudge(row.id, -1)}>−</button>
-          <b>{row.fmt(g)}</b>
-          <button type="button" onClick={() => nudge(row.id, 1)}>＋</button>
+      <div className="debug-dock-mini">数値</div>
+      <div className="debug-dock-tabs" role="tablist" aria-label="デバッグ">
+        <button type="button" role="tab" aria-selected={tab === "live"} className={tab === "live" ? "on" : ""} onPointerDown={(e) => e.stopPropagation()} onClick={() => setTab("live")}>
+          数値
+        </button>
+        <button type="button" role="tab" aria-selected={tab === "summon"} className={tab === "summon" ? "on" : ""} onPointerDown={(e) => e.stopPropagation()} onClick={() => setTab("summon")}>
+          召喚
+        </button>
+      </div>
+      {tab === "live" ? (
+        LIVE.map((row) => (
+          <div key={row.id} className="debug-dock-row">
+            <span>{row.label}</span>
+            <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={() => nudge(row.id, -1)}>
+              −
+            </button>
+            <b>{row.fmt(g)}</b>
+            <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={() => nudge(row.id, 1)}>
+              ＋
+            </button>
+          </div>
+        ))
+      ) : (
+        <div className="debug-dock-summon">
+          <div className="debug-dock-faces">
+            {ROSTER_IDS.map((id) => (
+              <button
+                key={id}
+                type="button"
+                className={who === id ? "on" : ""}
+                aria-pressed={who === id}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => setWho(id)}
+              >
+                <img src={`/assets/${id}.png`} alt="" width={28} height={28} />
+                <span>{HEROES[id].name}</span>
+              </button>
+            ))}
+          </div>
+          <div className="debug-dock-level">
+            <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={() => setLv((n) => Math.max(1, n - 1))} aria-label="レベルを下げる">
+              −
+            </button>
+            <b>Lv{displayLevel(lv)}</b>
+            <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={() => setLv((n) => Math.min(8, n + 1))} aria-label="レベルを上げる">
+              ＋
+            </button>
+          </div>
+          <button type="button" className="debug-dock-go" onPointerDown={(e) => e.stopPropagation()} onClick={summon}>
+            出す
+          </button>
+          {note ? <p>{note}</p> : null}
         </div>
-      ))}
+      )}
     </div>
   );
 }
