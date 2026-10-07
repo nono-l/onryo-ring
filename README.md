@@ -15,15 +15,7 @@ npm run dev
 
 ## コード
 
-ゲーム本体は [`src/game/`](src/game/) だけ見れば足りる。
-
-| ファイル | 役割 |
-|---|---|
-| `types.ts` | 状態 |
-| `data.ts` | 定数・HP式・スロット円配置 |
-| `sim.ts` | 1フレームのルール |
-| `draw.ts` | Canvas 描画。金皿3択もここ |
-| `GameView.tsx` | タイトル等の HTML オーバーレイと入力 |
+ゲーム本体は [`src/game/`](src/game/) だけ見れば足りる。ファイルの役割は [src/game/README.md](src/game/README.md)。
 
 次の人が触る前に **[SESSION.md](SESSION.md)** を読む。コーディング方針、コメント方針、やってはいけないことが、このリポジトリの中だけに書いてある。
 
